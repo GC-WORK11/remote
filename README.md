@@ -18,6 +18,24 @@ your credentials never leave the rig. Wi-Fi or Tailscale — even lid-closed.**
 
 ---
 
+<div align="center">
+
+### See it
+
+[![inbox demo](media/demo-inbox.gif)](https://github.com/GC-WORK11/remote/releases/download/v0.1/demo-inbox.mp4)
+
+*The inbox — every bot can code, browse the web, or drive your literal desktop.*
+*([full video](https://github.com/GC-WORK11/remote/releases/download/v0.1/demo-inbox.mp4))*
+
+[![thread demo](media/demo-thread.gif)](https://github.com/GC-WORK11/remote/releases/download/v0.1/demo-thread.mp4)
+
+*A thread — real agent turns, sub-agents, model picker, computer context.*
+*([full video](https://github.com/GC-WORK11/remote/releases/download/v0.1/demo-thread.mp4))*
+
+</div>
+
+---
+
 ## How it fits together
 
 ```mermaid
