@@ -1,0 +1,17 @@
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index 35ea160..bc5e437 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -726,7 +726,11 @@ export async function openRpcSession(
+ 		: path.dirname(current) === dir && session.messages.length === 0;
+ 	let cancelled = false;
+ 	if (!alreadyOpen) {
+-		cancelled = latest ? !(await session.switchSession(latest)) : !(await session.newSession({ sessionDir: dir }));
++		// The host owns the process cwd (omprd pins --cwd per session); a recorded
++		// cwd that differs must not reject the resume or move the process.
++		cancelled = latest
++			? !(await session.switchSession(latest, { preserveLocalCwd: true }))
++			: !(await session.newSession({ sessionDir: dir }));
+ 		if (!cancelled) subagentRegistry?.clear();
+ 	}
+ 	return {

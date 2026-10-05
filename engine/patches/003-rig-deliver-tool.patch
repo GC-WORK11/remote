@@ -1,0 +1,189 @@
+diff --git a/packages/coding-agent/src/prompts/tools/rig-deliver.md b/packages/coding-agent/src/prompts/tools/rig-deliver.md
+new file mode 100644
+index 0000000..2f767eb
+--- /dev/null
++++ b/packages/coding-agent/src/prompts/tools/rig-deliver.md
+@@ -0,0 +1,5 @@
++Hand a file that lives on this rig to the user's phone.
++
++Call `rig_deliver` with the absolute `path` after you have created or downloaded something the user asked for — a document, slide deck, image, archive, exported data. The Remote app renders it as a download card in the chat thread; the user taps it and the file lands on their phone, where they can open or share it.
++
++Verify the file exists first (the tool checks and fails cleanly if it does not). Deliver the final artifact, not intermediate files. One deliver call per file; if the user asked for several, deliver each.
+diff --git a/packages/coding-agent/src/tools/builtin-names.ts b/packages/coding-agent/src/tools/builtin-names.ts
+index 680cd26..e97e9d5 100644
+--- a/packages/coding-agent/src/tools/builtin-names.ts
++++ b/packages/coding-agent/src/tools/builtin-names.ts
+@@ -30,6 +30,7 @@ export const BUILTIN_TOOL_NAMES = [
+ 	"learn",
+ 	"manage_skill",
+ 	"rig_computer",
++	"rig_deliver",
+ ] as const;
+ 
+ export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
+diff --git a/packages/coding-agent/src/tools/essential-tools.ts b/packages/coding-agent/src/tools/essential-tools.ts
+index de6d194..5344254 100644
+--- a/packages/coding-agent/src/tools/essential-tools.ts
++++ b/packages/coding-agent/src/tools/essential-tools.ts
+@@ -35,6 +35,7 @@ export const ESSENTIAL_BUILTIN_TOOL_NAMES: Record<string, true> = {
+ 	context_notes: true,
+ 	new_context: true,
+ 	rig_computer: true,
++	rig_deliver: true,
+ };
+ 
+ /**
+diff --git a/packages/coding-agent/src/tools/index.ts b/packages/coding-agent/src/tools/index.ts
+index 5d2c8db..fad37c4 100644
+--- a/packages/coding-agent/src/tools/index.ts
++++ b/packages/coding-agent/src/tools/index.ts
+@@ -69,6 +69,7 @@ import { MemoryRetainTool } from "./memory-retain";
+ import { wrapToolWithMetaNotice } from "./output-meta";
+ import { ReadTool } from "./read";
+ import { RigComputerTool } from "./rig-computer";
++import { RigDeliverTool } from "./rig-deliver";
+ import type { PlanProposalHandler } from "./resolve";
+ import { SecurityScanTool } from "./security-scan";
+ import { supportsExternalThinking, ThinkTool } from "./think";
+@@ -594,6 +595,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
+ 	learn: LearnTool.createIf,
+ 	manage_skill: ManageSkillTool.createIf,
+ 	rig_computer: RigComputerTool.createIf,
++	rig_deliver: RigDeliverTool.createIf,
+ };
+ 
+ export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {
+diff --git a/packages/coding-agent/src/tools/rig-computer.ts b/packages/coding-agent/src/tools/rig-computer.ts
+index 2756ed1..d55f9e2 100644
+--- a/packages/coding-agent/src/tools/rig-computer.ts
++++ b/packages/coding-agent/src/tools/rig-computer.ts
+@@ -23,7 +23,7 @@ const DEFAULT_TIMEOUT_MS = 30_000;
+ const CONNECT_TIMEOUT_MS = 5_000;
+ 
+ /** One serialized request/reply channel over the daemon's loopback WS. */
+-class OmpdBridge {
++export class OmpdBridge {
+ 	#ws: WebSocket | null = null;
+ 	#open: Promise<WebSocket> | null = null;
+ 	#tail: Promise<unknown> = Promise.resolve();
+@@ -121,7 +121,7 @@ class OmpdBridge {
+ 
+ let sharedBridge: OmpdBridge | null = null;
+ 
+-function bridgeFromEnv(): OmpdBridge | null {
++export function bridgeFromEnv(): OmpdBridge | null {
+ 	const url = process.env.OMPD_WS;
+ 	const token = process.env.OMPD_TOKEN;
+ 	if (!url || !token) return null;
+diff --git a/packages/coding-agent/src/tools/rig-deliver.ts b/packages/coding-agent/src/tools/rig-deliver.ts
+new file mode 100644
+index 0000000..4de574f
+--- /dev/null
++++ b/packages/coding-agent/src/tools/rig-deliver.ts
+@@ -0,0 +1,106 @@
++import { type } from "@oh-my-pi/omptype";
++import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
++import type { TextContent } from "@oh-my-pi/pi-ai";
++import { prompt } from "@oh-my-pi/pi-utils";
++import rigDeliverDescription from "../prompts/tools/rig-deliver.md" with { type: "text" };
++import type { ToolSession } from ".";
++import { bridgeFromEnv } from "./rig-computer";
++import { throwIfAborted } from "./tool-errors";
++
++/**
++ * rig_deliver — hand a file that lives on the rig to the user's phone.
++ *
++ * Same loopback bridge as rig_computer: omprd injects OMPD_WS + OMPD_TOKEN
++ * into every spawned omp child; absent those, the tool stays unregistered so
++ * the schema never reaches the model. The tool verifies the path through
++ * rig.fs.stat, then returns a `{"type":"rig.deliver", ...}` text payload —
++ * the Remote app detects that marker in the tool result (same channel the
++ * computer.observe shots ride) and renders a download card in the thread:
++ * tap → rig.fs.read → bytes land on the phone and open the share sheet.
++ * Nothing is pushed anywhere; the phone pulls on demand.
++ */
++
++type JsonObj = Record<string, unknown>;
++
++const rigDeliverSchema = type({
++	path: type("string").describe("absolute path of the file to hand to the phone"),
++	"caption?": type("string").describe("one line shown under the file card, e.g. 'Q3 deck'"),
++	"cwd?": type("string").describe("resolve a relative path against this directory"),
++});
++type RigDeliverParams = typeof rigDeliverSchema.infer;
++
++interface RigDeliverDetails {
++	path: string;
++	ok: boolean;
++	reply: JsonObj;
++}
++
++export class RigDeliverTool implements AgentTool<typeof rigDeliverSchema, RigDeliverDetails> {
++	readonly name = "rig_deliver";
++	readonly label = "Deliver File";
++	readonly summary = "Send a file on this rig to the user's phone chat";
++	readonly description = prompt.render(rigDeliverDescription);
++	readonly parameters = rigDeliverSchema;
++	readonly strict = true;
++	readonly interruptible = true;
++	// File bytes leave the machine for a remote device — an egress side
++	// effect, same approval tier as exec/computer input.
++	readonly approval = "exec" as const;
++	readonly loadMode = "essential" as const;
++	readonly intent = "optional" as const;
++
++	static createIf(session: ToolSession): RigDeliverTool | null {
++		return bridgeFromEnv() ? new RigDeliverTool(session) : null;
++	}
++
++	constructor(private readonly session: ToolSession) {}
++
++	async execute(
++		_toolCallId: string,
++		params: RigDeliverParams,
++		signal?: AbortSignal,
++		_onUpdate?: AgentToolUpdateCallback<RigDeliverDetails>,
++	): Promise<AgentToolResult<RigDeliverDetails>> {
++		throwIfAborted(signal);
++		const bridge = bridgeFromEnv();
++		if (!bridge) {
++			return {
++				content: [{ type: "text", text: "rig_deliver unavailable: OMPD_WS/OMPD_TOKEN not set" }],
++				details: { path: params.path, ok: false, reply: {} },
++				isError: true,
++			};
++		}
++		const stat = await bridge.request({
++			type: "rig.fs.stat",
++			path: params.path,
++			...(params.cwd ? { cwd: params.cwd } : {}),
++		});
++		throwIfAborted(signal);
++		if (stat.type === "error" || stat.ok === false || stat.exists !== true || stat.kind !== "file") {
++			const why =
++				stat.exists === false
++					? "file does not exist"
++					: stat.kind && stat.kind !== "file"
++						? `path is a ${String(stat.kind)}, not a file`
++						: typeof stat.error === "string"
++							? stat.error
++							: "stat failed";
++			return {
++				content: [{ type: "text", text: `rig_deliver ${params.path}: ${why}` }],
++				details: { path: params.path, ok: false, reply: stat },
++				isError: true,
++			};
++		}
++		const resolved = typeof stat.path === "string" ? stat.path : params.path;
++		const payload: JsonObj = {
++			type: "rig.deliver",
++			path: resolved,
++			name: resolved.split("/").pop() || resolved,
++			size: typeof stat.size === "number" ? stat.size : null,
++			mtimeMs: typeof stat.mtimeMs === "number" ? stat.mtimeMs : null,
++			caption: params.caption ?? "",
++		};
++		const content: TextContent[] = [{ type: "text", text: JSON.stringify(payload) }];
++		return { content, details: { path: resolved, ok: true, reply: payload }, isError: false };
++	}
++}

@@ -1,0 +1,6 @@
+# Patch files and shell scripts must keep LF on Windows checkouts —
+# git apply refuses context lines that carry CRLF, and sh chokes on \r.
+*.patch -text
+*.sh text eol=lf
+engine/patches/* -text
+os-bridge/installer/** text eol=lf

@@ -1,0 +1,45 @@
+diff --git a/packages/coding-agent/src/modes/rpc/rpc-mode.ts b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+index f6304ae..3c2172c 100644
+--- a/packages/coding-agent/src/modes/rpc/rpc-mode.ts
++++ b/packages/coding-agent/src/modes/rpc/rpc-mode.ts
+@@ -101,6 +101,19 @@ import type {
+ 
+ const INVALID_TEXT_CURSOR_ERROR = "cursor must be an integer UTF-16 offset within text";
+ 
++/**
++ * Bound on waiting out background model discovery: a wedged provider (dead
++ * OAuth refresh, hung endpoint) can stall `awaitBackgroundRefresh` for tens
++ * of seconds, and RPC commands serialize behind it — an unbounded wait makes
++ * the whole channel look frozen. Past the budget the registry serves whatever
++ * catalog it already has; late providers still land for the next call.
++ */
++const MODEL_DISCOVERY_WAIT_MS = 8_000;
++
++async function awaitModelDiscoveryBounded(session: AgentSession): Promise<void> {
++	await Promise.race([session.modelRegistry.awaitBackgroundRefresh(), Bun.sleep(MODEL_DISCOVERY_WAIT_MS)]);
++}
++
+ function isTextCursor(text: unknown, cursor: unknown): text is string {
+ 	return (
+ 		typeof text === "string" &&
+@@ -2098,8 +2115,9 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 					// start, discovery-backed providers (proxy / ollama / etc.)
+ 					// populate seconds after session ready. Models already in
+ 					// the bundled catalog skip this await entirely so the RPC
+-					// queue is not stalled behind unrelated discovery.
+-					await session.modelRegistry.awaitBackgroundRefresh();
++					// queue is not stalled behind unrelated discovery. Bounded:
++					// a wedged provider must not freeze the command queue.
++					await awaitModelDiscoveryBounded(session);
+ 					models = session.getAvailableModels();
+ 					model = models.find(m => m.provider === command.provider && m.id === command.modelId);
+ 				}
+@@ -2119,7 +2137,7 @@ export async function runRpcMode(session: AgentSession, options: RpcModeOptions
+ 			}
+ 
+ 			case "get_available_models": {
+-				await session.modelRegistry.awaitBackgroundRefresh();
++				await awaitModelDiscoveryBounded(session);
+ 				const models = session.getAvailableModels();
+ 				return success(id, "get_available_models", { models });
+ 			}

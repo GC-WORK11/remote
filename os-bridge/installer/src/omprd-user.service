@@ -1,0 +1,14 @@
+[Unit]
+Description=Pocket Rig daemon (omprd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@PREFIX@/bin/omprd --omp-bin @PREFIX@/bin/omp
+Restart=on-failure
+RestartSec=3
+Environment=OMP_HOME=%h/.omp
+
+[Install]
+WantedBy=default.target

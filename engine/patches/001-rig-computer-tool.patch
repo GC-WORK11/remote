@@ -1,0 +1,454 @@
+diff --git a/packages/coding-agent/src/prompts/tools/rig-computer.md b/packages/coding-agent/src/prompts/tools/rig-computer.md
+new file mode 100644
+index 0000000..acc2a12
+--- /dev/null
++++ b/packages/coding-agent/src/prompts/tools/rig-computer.md
+@@ -0,0 +1,7 @@
++Operate the rig's real display through the omprd computer surface: look, then act.
++
++Run `op=observe` (screenshot + window list + cursor in one call) or `op=screenshot` to see the screen — the reply includes the image so you can read coordinates from it. `op=windows` lists windows without an image; `op=state` reports display, resolution, backend, and capture/inject permission grants.
++
++Act with `op=click`/`doubleclick` (x, y, button), `type` (text), `key` (combo like `Return`, `ctrl+s`, `cmd+q`), `scroll` (x?, y?, direction, times, dx), `drag`/`gesture`, `launch` (app binary, args), `activate`/`close`/`waitWindow` (window id or title substring), and `batch` (a list of raw steps for one round trip). `op=perms` reports OS grants — call it with `request=true` when inject/capture is denied.
++
++Prefer `key`/`type` over clicking tiny targets when the app accepts them. After any action that changes the screen, observe again before the next step.
+diff --git a/packages/coding-agent/src/tools/builtin-names.ts b/packages/coding-agent/src/tools/builtin-names.ts
+index 7a1d7f7..680cd26 100644
+--- a/packages/coding-agent/src/tools/builtin-names.ts
++++ b/packages/coding-agent/src/tools/builtin-names.ts
+@@ -29,6 +29,7 @@ export const BUILTIN_TOOL_NAMES = [
+ 	"reflect",
+ 	"learn",
+ 	"manage_skill",
++	"rig_computer",
+ ] as const;
+ 
+ export type BuiltinToolName = (typeof BUILTIN_TOOL_NAMES)[number];
+diff --git a/packages/coding-agent/src/tools/essential-tools.ts b/packages/coding-agent/src/tools/essential-tools.ts
+index 86c2c60..de6d194 100644
+--- a/packages/coding-agent/src/tools/essential-tools.ts
++++ b/packages/coding-agent/src/tools/essential-tools.ts
+@@ -34,6 +34,7 @@ export const ESSENTIAL_BUILTIN_TOOL_NAMES: Record<string, true> = {
+ 	manage_skill: true,
+ 	context_notes: true,
+ 	new_context: true,
++	rig_computer: true,
+ };
+ 
+ /**
+diff --git a/packages/coding-agent/src/tools/index.ts b/packages/coding-agent/src/tools/index.ts
+index c7870c8..5d2c8db 100644
+--- a/packages/coding-agent/src/tools/index.ts
++++ b/packages/coding-agent/src/tools/index.ts
+@@ -68,6 +68,7 @@ import { MemoryReflectTool } from "./memory-reflect";
+ import { MemoryRetainTool } from "./memory-retain";
+ import { wrapToolWithMetaNotice } from "./output-meta";
+ import { ReadTool } from "./read";
++import { RigComputerTool } from "./rig-computer";
+ import type { PlanProposalHandler } from "./resolve";
+ import { SecurityScanTool } from "./security-scan";
+ import { supportsExternalThinking, ThinkTool } from "./think";
+@@ -146,6 +147,7 @@ export * from "./memory-retain";
+ export * from "./read";
+ export * from "./report-tool-issue";
+ export * from "./resolve";
++export * from "./rig-computer";
+ export type {
+ 	FindingPriority,
+ 	FindingPriorityInfo,
+@@ -591,6 +593,7 @@ export const BUILTIN_TOOLS: Record<BuiltinToolName, ToolFactory> = {
+ 	reflect: MemoryReflectTool.createIf,
+ 	learn: LearnTool.createIf,
+ 	manage_skill: ManageSkillTool.createIf,
++	rig_computer: RigComputerTool.createIf,
+ };
+ 
+ export const HIDDEN_TOOLS: Record<HiddenToolName, ToolFactory> = {
+diff --git a/packages/coding-agent/src/tools/rig-computer.ts b/packages/coding-agent/src/tools/rig-computer.ts
+new file mode 100644
+index 0000000..7ededcd
+--- /dev/null
++++ b/packages/coding-agent/src/tools/rig-computer.ts
+@@ -0,0 +1,383 @@
++import { type } from "@oh-my-pi/omptype";
++import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@oh-my-pi/pi-agent-core";
++import type { ImageContent, TextContent } from "@oh-my-pi/pi-ai";
++import { prompt } from "@oh-my-pi/pi-utils";
++import rigComputerDescription from "../prompts/tools/rig-computer.md" with { type: "text" };
++import type { ToolSession } from ".";
++import { throwIfAborted } from "./tool-errors";
++
++/**
++ * rig_computer — the agent drives the rig's REAL display through omprd.
++ *
++ * omprd injects OMPD_WS + OMPD_TOKEN into every omp child it spawns; when both
++ * are present this tool registers and every call is one authenticated loopback
++ * WebSocket request against the daemon's `computer.*` surface. When absent
++ * (omp run outside the rig) the tool factory returns null so the schema never
++ * reaches the model. The token never leaves the child env — it is not logged,
++ * persisted, or reflected into tool results.
++ */
++
++type JsonObj = Record<string, unknown>;
++
++const DEFAULT_TIMEOUT_MS = 30_000;
++const CONNECT_TIMEOUT_MS = 5_000;
++
++/** One serialized request/reply channel over the daemon's loopback WS. */
++class OmpdBridge {
++	#ws: WebSocket | null = null;
++	#open: Promise<WebSocket> | null = null;
++	#tail: Promise<unknown> = Promise.resolve();
++
++	constructor(
++		private readonly url: string,
++		private readonly token: string,
++	) {}
++
++	/** Queue a request; only one frame is ever in flight per socket. */
++	request(message: JsonObj, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<JsonObj> {
++		const run = this.#tail.then(() => this.#roundTrip(message, timeoutMs));
++		this.#tail = run.then(
++			() => undefined,
++			() => undefined,
++		);
++		return run;
++	}
++
++	#connect(): Promise<WebSocket> {
++		if (this.#open) return this.#open;
++		const sep = this.url.includes("?") ? "&" : "?";
++		const ws = new WebSocket(`${this.url}${sep}token=${encodeURIComponent(this.token)}`);
++		this.#open = new Promise<WebSocket>((resolve, reject) => {
++			const timer = setTimeout(() => {
++				this.#drop();
++				reject(new Error("omprd ws connect timed out"));
++			}, CONNECT_TIMEOUT_MS);
++			ws.onopen = () => {
++				clearTimeout(timer);
++				resolve(ws);
++			};
++			ws.onerror = () => {
++				clearTimeout(timer);
++				this.#drop();
++				reject(new Error("omprd ws connect failed"));
++			};
++		});
++		this.#ws = ws;
++		return this.#open;
++	}
++
++	#drop() {
++		this.#open = null;
++		const ws = this.#ws;
++		this.#ws = null;
++		if (ws && ws.readyState !== WebSocket.CLOSED && ws.readyState !== WebSocket.CLOSING) {
++			try {
++				ws.close();
++			} catch {
++				// best effort
++			}
++		}
++	}
++
++	async #roundTrip(message: JsonObj, timeoutMs: number): Promise<JsonObj> {
++		const ws = await this.#connect();
++		const { promise, resolve, reject } = Promise.withResolvers<JsonObj>();
++		const timer = setTimeout(() => {
++			// a late reply would poison the next request on this socket — drop it
++			this.#drop();
++			reject(new Error(`omprd request timed out after ${timeoutMs}ms`));
++		}, timeoutMs);
++		ws.onmessage = event => {
++			const data = typeof event.data === "string" ? event.data : "";
++			let frame: JsonObj;
++			try {
++				frame = JSON.parse(data) as JsonObj;
++			} catch {
++				clearTimeout(timer);
++				reject(new Error(`omprd reply was not JSON: ${data.slice(0, 120)}`));
++				return;
++			}
++			// Service clients are excluded from broadcast fan-out, but a frame
++			// already in flight when a request lands must not pose as its reply.
++			const ft = frame.type;
++			if (ft === "rpc" || (typeof ft === "string" && ft.startsWith("session."))) return;
++			clearTimeout(timer);
++			resolve(frame);
++		};
++		ws.onclose = () => {
++			clearTimeout(timer);
++			this.#drop();
++			reject(new Error("omprd ws closed"));
++		};
++		ws.onerror = () => {
++			clearTimeout(timer);
++			this.#drop();
++			reject(new Error("omprd ws error"));
++		};
++		ws.send(JSON.stringify(message));
++		return promise;
++	}
++}
++
++let sharedBridge: OmpdBridge | null = null;
++
++function bridgeFromEnv(): OmpdBridge | null {
++	const url = process.env.OMPD_WS;
++	const token = process.env.OMPD_TOKEN;
++	if (!url || !token) return null;
++	sharedBridge ??= new OmpdBridge(url, token);
++	return sharedBridge;
++}
++
++const OPS = [
++	"state",
++	"perms",
++	"cursor",
++	"screenshot",
++	"observe",
++	"windows",
++	"waitWindow",
++	"activate",
++	"close",
++	"click",
++	"doubleclick",
++	"type",
++	"key",
++	"scroll",
++	"drag",
++	"gesture",
++	"launch",
++	"batch",
++] as const;
++
++type RigOp = (typeof OPS)[number];
++
++const rigComputerSchema = type({
++	op: type.enumerated(...OPS).describe("computer operation to run against the rig display"),
++	"x?": type("number").describe("point x (click/doubleclick/scroll/gesture target)"),
++	"y?": type("number").describe("point y"),
++	"x2?": type("number").describe("end x (gesture swipe/drag)"),
++	"y2?": type("number").describe("end y"),
++	"fromX?": type("number").describe("drag start x"),
++	"fromY?": type("number").describe("drag start y"),
++	"toX?": type("number").describe("drag end x"),
++	"toY?": type("number").describe("drag end y"),
++	"button?": type("number").describe("mouse button: 1 left, 2 middle, 3 right (default 1)"),
++	"text?": type("string").describe("text to type (op=type)"),
++	"delayMs?": type("number").describe("per-key delay for type (ms)"),
++	"combo?": type("string").describe("key chord like 'Return', 'ctrl+s', 'cmd+q' (op=key)"),
++	"direction?": type.enumerated("up", "down").describe("wheel direction (op=scroll)"),
++	"times?": type("number").describe("wheel ticks (op=scroll)"),
++	"dx?": type("number").describe("horizontal scroll units (op=scroll)"),
++	"stepCount?": type("number").describe("motion interpolation steps (op=drag/gesture)"),
++	"durationMs?": type("number").describe("gesture duration (op=gesture)"),
++	"gestureOp?": type
++		.enumerated("tap", "doubleTap", "longPress", "swipe", "drag")
++		.describe("gesture kind (op=gesture)"),
++	"app?": type("string").describe("binary or command line to launch (op=launch)"),
++	"args?": type("string[]").describe("extra argv for launch"),
++	"id?": type("number").describe("window id (op=activate/close)"),
++	"title?": type("string").describe("window title substring (op=activate/close/waitWindow)"),
++	"timeoutMs?": type("number").describe("op timeout (waitWindow, batch)"),
++	"scale?": type("number").describe("screenshot/observe downscale 0.05-1 (default 0.5)"),
++	"quality?": type("number").describe("jpg quality 5-100 (default 70)"),
++	"format?": type.enumerated("jpg", "png").describe("capture encoding (default jpg)"),
++	"region?": type({
++		x: "number",
++		"y?": "number",
++		"w?": "number",
++		"h?": "number",
++	}).describe("capture sub-region (screenshot/observe)"),
++	"steps?": type("unknown[]").describe("op=batch: raw computer.* step objects"),
++	"stopOnError?": type("boolean").describe("op=batch: halt on first failed step"),
++	"request?": type("boolean").describe("op=perms: ask the OS for the missing grant"),
++	"display?": type("string").describe("X display override; omit to use the rig's current target"),
++	"+": "reject",
++});
++
++type RigComputerParams = typeof rigComputerSchema.infer;
++
++interface RigComputerDetails {
++	op: RigOp;
++	ok: boolean;
++	reply: JsonObj;
++}
++
++function need(params: RigComputerParams, field: keyof RigComputerParams, op: RigOp): NonNullable<unknown> {
++	const value = params[field];
++	if (value === undefined || value === null || value === "") {
++		throw new Error(`op=${op} requires ${field}`);
++	}
++	return value;
++}
++
++function imageMime(format: string | undefined): string {
++	return format === "png" ? "image/png" : "image/jpeg";
++}
++
++/** Fields forwarded verbatim on every request that supports them. */
++function withDisplay(params: RigComputerParams, msg: JsonObj): JsonObj {
++	if (params.display !== undefined) msg.display = params.display;
++	return msg;
++}
++
++function buildRequest(params: RigComputerParams): JsonObj {
++	switch (params.op) {
++		case "state":
++			return withDisplay(params, { type: "computer.state" });
++		case "perms":
++			return withDisplay(params, { type: "computer.perms", request: params.request === true });
++		case "cursor":
++			return withDisplay(params, { type: "computer.cursor" });
++		case "screenshot":
++		case "observe": {
++			const msg: JsonObj = { type: `computer.${params.op}` };
++			if (params.format !== undefined) msg.format = params.format;
++			if (params.quality !== undefined) msg.quality = params.quality;
++			if (params.scale !== undefined) msg.scale = params.scale;
++			if (params.region !== undefined) msg.region = params.region;
++			return withDisplay(params, msg);
++		}
++		case "windows":
++			return withDisplay(params, { type: "computer.windows" });
++		case "waitWindow":
++			return withDisplay(params, {
++				type: "computer.waitWindow",
++				title: need(params, "title", "waitWindow"),
++				timeoutMs: params.timeoutMs ?? 10_000,
++			});
++		case "activate":
++			return withDisplay(params, {
++				type: "computer.window.activate",
++				id: params.id ?? 0,
++				title: params.title ?? "",
++			});
++		case "close":
++			return withDisplay(params, {
++				type: "computer.window.close",
++				id: params.id ?? 0,
++				title: params.title ?? "",
++			});
++		case "click":
++		case "doubleclick":
++			return withDisplay(params, {
++				type: `computer.${params.op}`,
++				x: need(params, "x", params.op),
++				y: need(params, "y", params.op),
++				button: params.button ?? 1,
++			});
++		case "type":
++			return withDisplay(params, {
++				type: "computer.type",
++				text: need(params, "text", "type"),
++				delayMs: params.delayMs,
++			});
++		case "key":
++			return withDisplay(params, { type: "computer.key", combo: need(params, "combo", "key") });
++		case "scroll":
++			return withDisplay(params, {
++				type: "computer.scroll",
++				x: params.x,
++				y: params.y,
++				direction: params.direction ?? "down",
++				times: params.times ?? 3,
++				dx: params.dx ?? 0,
++			});
++		case "drag":
++			return withDisplay(params, {
++				type: "computer.drag",
++				fromX: need(params, "fromX", "drag"),
++				fromY: need(params, "fromY", "drag"),
++				toX: need(params, "toX", "drag"),
++				toY: need(params, "toY", "drag"),
++				steps: params.stepCount ?? 12,
++			});
++		case "gesture":
++			return withDisplay(params, {
++				type: "computer.gesture",
++				op: need(params, "gestureOp", "gesture"),
++				x: params.x,
++				y: params.y,
++				x2: params.x2,
++				y2: params.y2,
++				durationMs: params.durationMs,
++				steps: params.stepCount,
++			});
++		case "launch":
++			return withDisplay(params, {
++				type: "computer.launch",
++				app: need(params, "app", "launch"),
++				args: params.args,
++			});
++		case "batch":
++			return withDisplay(params, {
++				type: "computer.actions",
++				steps: need(params, "steps", "batch"),
++				stopOnError: params.stopOnError ?? true,
++			});
++	}
++}
++
++function requestTimeout(params: RigComputerParams): number {
++	if (params.op === "waitWindow") return (params.timeoutMs ?? 10_000) + 10_000;
++	if (params.op === "type") return 60_000;
++	return DEFAULT_TIMEOUT_MS;
++}
++
++export class RigComputerTool implements AgentTool<typeof rigComputerSchema, RigComputerDetails> {
++	readonly name = "rig_computer";
++	readonly label = "Rig Computer";
++	readonly summary = "Operate the rig's display: screenshot, click, type, scroll, windows";
++	readonly description = prompt.render(rigComputerDescription);
++	readonly parameters = rigComputerSchema;
++	readonly strict = true;
++	readonly interruptible = true;
++	// Display input is a side effect like exec — same approval tier.
++	readonly approval = "exec" as const;
++	readonly loadMode = "essential" as const;
++	readonly intent = "optional" as const;
++
++	static createIf(session: ToolSession): RigComputerTool | null {
++		return bridgeFromEnv() ? new RigComputerTool(session) : null;
++	}
++
++	constructor(private readonly session: ToolSession) {}
++
++	async execute(
++		_toolCallId: string,
++		params: RigComputerParams,
++		signal?: AbortSignal,
++		_onUpdate?: AgentToolUpdateCallback<RigComputerDetails>,
++	): Promise<AgentToolResult<RigComputerDetails>> {
++		throwIfAborted(signal);
++		const bridge = bridgeFromEnv();
++		if (!bridge) {
++			return {
++				content: [{ type: "text", text: "rig_computer unavailable: OMPD_WS/OMPD_TOKEN not set" }],
++				details: { op: params.op, ok: false, reply: {} },
++				isError: true,
++			};
++		}
++		const request = buildRequest(params);
++		const reply = await bridge.request(request, requestTimeout(params));
++		throwIfAborted(signal);
++		if (reply.type === "error") {
++			const message = typeof reply.error === "string" ? reply.error : JSON.stringify(reply);
++			return {
++				content: [{ type: "text", text: `rig_computer ${params.op} failed: ${message}` }],
++				details: { op: params.op, ok: false, reply },
++				isError: true,
++			};
++		}
++		const content: Array<TextContent | ImageContent> = [];
++		const meta: JsonObj = { ...reply };
++		const image = typeof reply.imageBase64 === "string" ? reply.imageBase64 : null;
++		delete meta.imageBase64;
++		content.push({ type: "text", text: JSON.stringify(meta) });
++		if (image) {
++			content.push({ type: "image", data: image, mimeType: imageMime(reply.format as string) });
++		}
++		const ok = reply.ok !== false;
++		return { content, details: { op: params.op, ok, reply: meta }, isError: !ok };
++	}
++}

@@ -1,0 +1,16 @@
+daemon/omprd
+daemon/omprd-dbg
+daemon/*.o
+__pycache__/
+*.pyc
+.slim/
+node_modules/
+os-bridge/daemon/omprd
+engine/omp/
+demo/
+remote-v1.apk
+os-bridge/daemon/omprd.exe
+remote-v2.apk
+os-bridge/installer/dist/
+os-bridge/installer/payload/
+landing/shots/

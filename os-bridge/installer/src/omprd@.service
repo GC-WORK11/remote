@@ -1,0 +1,16 @@
+[Unit]
+Description=Pocket Rig daemon (omprd) for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=%i
+Environment=HOME=@USER_HOME@
+Environment=OMP_HOME=@USER_HOME@/.omp
+ExecStart=/opt/remote/bin/omprd --omp-bin /opt/remote/bin/omp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

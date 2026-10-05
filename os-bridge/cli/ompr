@@ -1,0 +1,638 @@
+#!/usr/bin/env python3
+"""ompr — remote OS-bridge CLI (Python glue: setup, pairing, status).
+
+The daemon (omprd, C++) does the work; this is the human side.
+"""
+from __future__ import annotations
+
+import base64
+import json
+import os
+import secrets
+import shutil
+import socket
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+RIG_DIR = Path.home() / ".rig"
+DEFAULT_PORT = 8790
+
+
+def tailscale_ip() -> str | None:
+    try:
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
+        ip = out.stdout.strip().splitlines()[0].strip() if out.stdout.strip() else None
+        return ip or None
+    except Exception:
+        return None
+
+
+def lan_ip() -> str | None:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        ip = s.getsockname()[0]
+        s.close()
+        return ip
+    except Exception:
+        return None
+
+
+def advertised_ip() -> str:
+    return tailscale_ip() or lan_ip() or "127.0.0.1"
+
+
+REPO = Path(__file__).resolve().parent.parent
+
+
+def omp_bin() -> str | None:
+    if os.environ.get("OMP_BIN"):
+        return os.environ["OMP_BIN"]
+    fork_wrap = REPO / "tools" / "omp-fork.sh"
+    if fork_wrap.exists() and (REPO.parent / "engine" / "omp" / "packages" / "coding-agent" / "src" / "cli.ts").exists():
+        return str(fork_wrap)
+    for p in [
+        Path.home() / ".local" / "share" / "remote" / "bin" / "omp",
+        Path.home() / ".rig" / "omp" / "node_modules" / ".bin" / "omp",
+        Path.home() / "node_modules/.bin/omp",
+    ]:
+        if p.exists():
+            return str(p)
+    try:
+        out = subprocess.run(["which", "omp"], capture_output=True, text=True, timeout=5)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def omprd_bin() -> Path:
+    return REPO / "daemon" / "omprd"
+
+
+def cmd_pair(args):
+    ip = tailscale_ip()
+    via = "tailscale" if ip else None
+    if not ip:
+        ip = lan_ip()
+        via = "lan" if ip else None
+    if not ip:
+        ip = "127.0.0.1"
+        via = "localhost"
+
+    code = f"{secrets.randbelow(1000000):06d}"
+    RIG_DIR.mkdir(exist_ok=True)
+    pending = {"code": code, "expires": int(time.time()) + 600}
+    (RIG_DIR / "pending.json").write_text(json.dumps(pending))
+
+    url = f"ws://{ip}:{DEFAULT_PORT}/ws"
+    print(f"rig: {socket.gethostname()}  ({ip}, via {via})")
+    print(f"code: {code}   (valid 10 min)")
+    # Pasteable deep link — the app's address field parses
+    # remote://host:port#code (same shape `omprd --qr` prints).
+    print(f"link: remote://{ip}:{DEFAULT_PORT}#{code}\n")
+    payload = json.dumps({"url": url, "code": code})
+    try:
+        import qrcode  # type: ignore
+        qr = qrcode.QRCode(border=1)
+        qr.add_data(payload)
+        qr.make(fit=True)
+        qr.print_ascii(tty=sys.stdout.isatty())
+        print("\nscan from the Remote app (or any client)")
+    except ImportError:
+        # zero-dep fallback: vendored QR encoder (byte mode, EC level L,
+        # mask 0 — spec-legal, every scanner decodes it)
+        print(_qr_ascii(payload))
+        print("\nscan from the Remote app (or any client)")
+        print(f"or connect to: {url}")
+        print(f'and send: {{"type":"pair","code":"{code}","device":"my-phone"}}')
+    if via == "lan":
+        print("\nphone must be on the same network — or install Tailscale on both to pair from anywhere.")
+
+
+# --- vendored QR encoder (byte mode, EC level L, versions 1-10) ---------
+# Minimal correct implementation so `ompr pair` prints a scannable QR on
+# any stock Python — no pip install needed.
+
+_QR_TOT = [26, 44, 70, 100, 134, 172, 196, 242, 292, 346]          # v1-10 total codewords
+_QR_ECB = [7, 10, 15, 20, 26, 18, 20, 24, 30, 18]                 # EC codewords per block (L)
+_QR_BLK = [1, 1, 1, 1, 1, 2, 2, 2, 2, 4]                          # EC blocks (L)
+_QR_ALI = [[], [6, 18], [6, 22], [6, 26], [6, 30], [6, 34],
+           [6, 22, 38], [6, 24, 42], [6, 26, 46], [6, 28, 50]]     # alignment centers
+
+_QR_EXP = [0] * 512
+_QR_LOG = [0] * 256
+_x = 1
+for _i in range(255):
+    _QR_EXP[_i] = _x
+    _QR_LOG[_x] = _i
+    _x <<= 1
+    if _x & 0x100:
+        _x ^= 0x11D
+for _i in range(255, 512):
+    _QR_EXP[_i] = _QR_EXP[_i - 255]
+
+
+def _qr_gf_mul(a, b):
+    return 0 if a == 0 or b == 0 else _QR_EXP[_QR_LOG[a] + _QR_LOG[b]]
+
+
+def _qr_rs_gen(deg):
+    poly = [1]
+    for i in range(deg):
+        nxt = [0] * (len(poly) + 1)
+        for j, c in enumerate(poly):
+            nxt[j] ^= _qr_gf_mul(c, _QR_EXP[i])
+            nxt[j + 1] ^= c
+        poly = nxt
+    return poly
+
+
+def _qr_rs_rem(data, gen):
+    # gen is ascending-degree (x^0 first, leading x^deg=1 last); the shift
+    # register is descending-degree, so feed gen reversed without its lead.
+    div = gen[-2::-1]
+    rem = [0] * (len(gen) - 1)
+    for b in data:
+        f = b ^ rem.pop(0)
+        rem.append(0)
+        for j in range(len(rem)):
+            rem[j] ^= _qr_gf_mul(div[j], f)
+    return rem
+
+
+def _qr_ascii(text):
+    data = text.encode("utf-8")
+    for vi in range(10):
+        datacw = _QR_TOT[vi] - _QR_ECB[vi] * _QR_BLK[vi]
+        if 4 + 8 + 8 * len(data) <= datacw * 8:
+            break
+    else:
+        raise ValueError("payload too large for QR v10")
+    ver = vi + 1
+    size = 17 + 4 * ver
+    datacw = _QR_TOT[vi] - _QR_ECB[vi] * _QR_BLK[vi]
+
+    # bit buffer: mode 0100, 8-bit count, data, terminator, pad EC 11
+    bits = []
+    def put(val, n):
+        for k in range(n - 1, -1, -1):
+            bits.append((val >> k) & 1)
+    put(0b0100, 4)
+    put(len(data), 8)
+    for b in data:
+        put(b, 8)
+    put(0, min(4, datacw * 8 - len(bits)))
+    while len(bits) % 8:
+        bits.append(0)
+    pad = 0xEC
+    while len(bits) < datacw * 8:
+        put(pad, 8)
+        pad ^= 0xEC ^ 0x11
+    codewords = [sum(bits[i + k] << (7 - k) for k in range(8)) for i in range(0, len(bits), 8)]
+
+    # split into blocks, append RS EC, interleave
+    nb, epb = _QR_BLK[vi], _QR_ECB[vi]
+    short_len = datacw // nb
+    nlong = datacw % nb
+    blocks = []
+    pos = 0
+    for b in range(nb):
+        ln = short_len + (1 if b >= nb - nlong else 0)
+        blocks.append(codewords[pos:pos + ln])
+        pos += ln
+    gen = _qr_rs_gen(epb)
+    ecs = [_qr_rs_rem(blk, gen) for blk in blocks]
+    inter = []
+    maxd = max(len(b) for b in blocks)
+    for i in range(maxd):
+        for blk in blocks:
+            if i < len(blk):
+                inter.append(blk[i])
+    for i in range(epb):
+        for ec in ecs:
+            inter.append(ec[i])
+
+    # matrix: -1 unset, 0/1 data, 2/3 = function dark/light
+    m = [[-1] * size for _ in range(size)]
+    func = [[False] * size for _ in range(size)]
+
+    def set_f(r, c, dark):
+        if 0 <= r < size and 0 <= c < size:
+            m[r][c] = 1 if dark else 0
+            func[r][c] = True
+
+    def finder(r, c):
+        for dr in range(-1, 8):
+            for dc in range(-1, 8):
+                rr, cc = r + dr, c + dc
+                if 0 <= rr < size and 0 <= cc < size:
+                    dark = (0 <= dr <= 6 and 0 <= dc <= 6 and
+                            (dr in (0, 6) or dc in (0, 6) or (2 <= dr <= 4 and 2 <= dc <= 4)))
+                    set_f(rr, cc, dark)
+    finder(0, 0); finder(0, size - 7); finder(size - 7, 0)
+    for i in range(8, size - 8):
+        set_f(6, i, i % 2 == 0); set_f(i, 6, i % 2 == 0)
+    ali = _QR_ALI[vi]
+    nal = len(ali)
+    for i in range(nal):
+        for j in range(nal):
+            # skip the three alignment centers that overlap finder patterns
+            if (i == 0 and j == 0) or (i == 0 and j == nal - 1) or (i == nal - 1 and j == 0):
+                continue
+            ar, ac = ali[i], ali[j]
+            for dr in range(-2, 3):
+                for dc in range(-2, 3):
+                    set_f(ar + dr, ac + dc, max(abs(dr), abs(dc)) != 1)
+    # reserve format areas
+    for i in range(9):
+        if i != 6:
+            set_f(8, i, False); set_f(i, 8, False)
+    for i in range(8):
+        set_f(8, size - 1 - i, False); set_f(size - 1 - i, 8, False)
+    set_f(size - 8, 8, True)  # dark module
+    if ver >= 7:
+        for i in range(18):
+            set_f(i // 3, size - 11 + i % 3, False)
+            set_f(size - 11 + i % 3, i // 3, False)
+
+    # zigzag data
+    i = 0
+    r, c, up = size - 1, size - 1, True
+    while c > 0:
+        if c == 6:
+            c -= 1
+        for _ in range(size):
+            for dc in (0, 1):
+                cc = c - dc
+                if not func[r][cc]:
+                    m[r][cc] = inter[i >> 3] >> (7 - (i & 7)) & 1 if i < len(inter) * 8 else 0
+                    i += 1
+            r += -1 if up else 1
+        r += 1 if up else -1
+        up = not up
+        c -= 2
+
+    # mask 0 (r+c)%2==0 on non-function modules
+    for rr in range(size):
+        for cc in range(size):
+            if not func[rr][cc] and (rr + cc) % 2 == 0:
+                m[rr][cc] ^= 1
+
+    # format info: level L (01) + mask 0 → data 0b01000; BCH + 0x5412.
+    # Two copies wrap the top-left finder: down col 8 (skip row 6) then
+    # along row 8; and the right edge of row 8 + bottom of col 8.
+    d = 0b01000
+    rem = d
+    for _ in range(10):
+        rem = (rem << 1) ^ ((rem >> 9) * 0x537)
+    fbits = ((d << 10) | rem) ^ 0x5412
+    for k in range(6):
+        set_f(k, 8, (fbits >> k) & 1)
+    set_f(7, 8, (fbits >> 6) & 1)
+    set_f(8, 8, (fbits >> 7) & 1)
+    set_f(8, 7, (fbits >> 8) & 1)
+    for k in range(9, 15):
+        set_f(8, 14 - k, (fbits >> k) & 1)
+    for k in range(8):
+        set_f(8, size - 1 - k, (fbits >> k) & 1)
+    for k in range(8, 15):
+        set_f(size - 15 + k, 8, (fbits >> k) & 1)
+    if ver >= 7:
+        rem = ver
+        for _ in range(12):
+            rem = (rem << 1) ^ ((rem >> 11) * 0x1F25)
+        vbits = (ver << 12) | rem
+        for k in range(18):
+            bit = (vbits >> k) & 1
+            set_f(k // 3, size - 11 + k % 3, bit)
+            set_f(size - 11 + k % 3, k // 3, bit)
+
+    out = []
+    for rr in range(-1, size + 1):
+        row = []
+        for cc in range(-1, size + 1):
+            row.append("██" if 0 <= rr < size and 0 <= cc < size and m[rr][cc] else "  ")
+        out.append("".join(row))
+    return "\n".join(out)
+
+
+def cmd_status(args):
+    ip = tailscale_ip() or "127.0.0.1"
+    # Minimal WS-less probe: daemon answers plain HTTP GET / with 404 JSON — enough for liveness.
+    import urllib.request
+    try:
+        r = urllib.request.urlopen(f"http://{ip}:{DEFAULT_PORT}/anything", timeout=3)
+        print("daemon: up")
+    except urllib.error.HTTPError:
+        print(f"daemon: up ({ip}:{DEFAULT_PORT})")
+    except Exception:
+        print(f"daemon: DOWN (expected at {ip}:{DEFAULT_PORT})")
+
+    devices = RIG_DIR / "devices.json"
+    if devices.exists():
+        devs = json.loads(devices.read_text())
+        print(f"devices: {len(devs)}")
+        for d in devs:
+            print(f"  - {d.get('device','?')}  paired {time.strftime('%Y-%m-%d %H:%M', time.localtime(d.get('paired_at',0)))}")
+    else:
+        print("devices: none paired yet")
+
+
+def cmd_unpair(args):
+    if not args:
+        print("usage: ompr unpair <device-name>")
+        sys.exit(1)
+    devices = RIG_DIR / "devices.json"
+    if not devices.exists():
+        print("no devices.json")
+        sys.exit(1)
+    devs = json.loads(devices.read_text())
+    kept = [d for d in devs if d.get("device") != args[0]]
+    if len(kept) == len(devs):
+        print(f"no device named {args[0]!r}")
+        sys.exit(1)
+    devices.write_text(json.dumps(kept))
+    print(f"revoked {args[0]!r} (takes effect on daemon restart; restart omprd)")
+
+
+def _apt_install(pkgs):
+    """Try a non-interactive apt install; returns True on success."""
+    if not shutil.which("apt-get"):
+        return False
+    base = [] if os.geteuid() == 0 else ["sudo", "-n"]
+    if base and subprocess.run(base + ["true"], capture_output=True).returncode != 0:
+        return False  # sudo would prompt — don't block setup
+    return subprocess.run(base + ["apt-get", "install", "-y"] + pkgs).returncode == 0
+
+
+def cmd_setup(args):
+    print("remote setup\n---------------")
+    ip = tailscale_ip()
+    if ip:
+        print(f"[ok] tailscale: {ip}")
+    else:
+        li = lan_ip()
+        print(f"[..] tailscale missing — LAN fallback: {li or 'unavailable'} (install tailscale to reach the rig from anywhere)")
+
+    # Linux daemon runtime deps: X display tools + a WM for spawned displays.
+    # Everything else degrades gracefully, so this is check-and-hint, not fatal.
+    if sys.platform.startswith("linux"):
+        want = {"xdotool": "xdotool", "wmctrl": "wmctrl", "Xvfb": "xvfb",
+                "import": "imagemagick", "make": "build-essential", "g++": "g++"}
+        missing = [p for tool, p in want.items() if not shutil.which(tool)]
+        wm_missing = not any(shutil.which(w) for w in
+                             ("openbox", "fluxbox", "icewm", "xfwm4", "kwin_x11", "metacity", "marco", "mutter"))
+        if wm_missing:
+            missing.append("openbox")
+        if missing:
+            if _apt_install(missing):
+                print(f"[ok] installed: {' '.join(missing)}")
+            else:
+                print(f"[!!] missing display deps: {' '.join(missing)}")
+                print(f"     install: sudo apt-get install -y {' '.join(missing)}")
+        else:
+            print("[ok] display deps: xdotool wmctrl xvfb imagemagick wm")
+
+    omp = omp_bin()
+    if omp:
+        if "engine" in omp and not (shutil.which("bun") or os.environ.get("BUN")):
+            print(f"[..] omp: {omp}  (fork wrapper needs bun — install bun or set BUN)")
+        else:
+            print(f"[ok] omp: {omp}")
+    else:
+        print("[..] omp not found — installing into ~/.rig/omp …")
+        if not shutil.which("npm"):
+            print("[!!] npm missing — install node.js first "
+                  "(macOS: brew install node · Debian/Ubuntu: sudo apt-get install nodejs npm)")
+            print("     then rerun ompr setup, or set OMP_BIN yourself")
+        else:
+            dest = Path.home() / ".rig" / "omp"
+            dest.mkdir(parents=True, exist_ok=True)
+            if subprocess.run(["npm", "install", "--prefix", str(dest), "@oh-my-pi/pi-coding-agent"]).returncode == 0:
+                omp = str(dest / "node_modules" / ".bin" / "omp")
+                os.environ["OMP_BIN"] = omp
+                print(f"[ok] omp: {omp}   (set OMP_BIN in your shell profile to keep it)")
+            else:
+                print("[!!] npm install failed — install omp yourself, set OMP_BIN")
+
+    built = omprd_bin()
+    if built.exists():
+        print(f"[ok] omprd: {built}")
+    else:
+        print("[..] omprd not built — running make …")
+        if subprocess.run(["make"], cwd=REPO).returncode == 0 and built.exists():
+            print(f"[ok] omprd: {built}")
+        else:
+            if sys.platform == "darwin":
+                print("[!!] make failed — need Xcode CLT: xcode-select --install")
+            elif sys.platform.startswith("linux"):
+                print("[!!] make failed — need g++ (C++20): sudo apt-get install build-essential")
+            else:
+                print("[!!] make failed — on Windows build with MSVC: "
+                      'cl /std:c++20 /O2 /EHsc daemon\\omprd.cpp /Fe:daemon\\omprd.exe /link ws2_32.lib')
+            sys.exit(1)
+    print("\nnext: ompr up  →  ompr pair  →  scan from phone")
+
+
+def cmd_up(args):
+    bin_path = omprd_bin()
+    if not bin_path.exists():
+        print("omprd not built — run: ompr setup")
+        sys.exit(1)
+    omp = omp_bin()
+    if not omp:
+        print("omp not found — run: ompr setup")
+        sys.exit(1)
+
+    if "--service" in args:
+        args = [a for a in args if a != "--service"]
+        return install_service(bin_path, omp, args)
+
+    RIG_DIR.mkdir(exist_ok=True)
+    log = open(RIG_DIR / "omprd.log", "ab")
+    argv = [str(bin_path), "--omp-bin", omp] + args
+    # sleep inhibitors so the rig survives idle + (on Linux) lid close —
+    # only wrap when the tool exists (minimal distros lack systemd-inhibit;
+    # a missing binary would make Popen raise instead of starting omprd)
+    if sys.platform.startswith("linux"):
+        if shutil.which("systemd-inhibit"):
+            argv = ["systemd-inhibit", "--what=sleep:idle:handle-lid-switch",
+                    "--why=remote rig", "--mode=block"] + argv
+        else:
+            print("[..] no systemd-inhibit — omprd runs without a sleep inhibitor")
+    elif sys.platform == "darwin":
+        if shutil.which("caffeinate"):
+            argv = ["caffeinate", "-s"] + argv
+        else:
+            print("[..] no caffeinate — omprd runs without a sleep inhibitor")
+    proc = subprocess.Popen(argv, stdout=log, stderr=log, start_new_session=True)
+    time.sleep(0.8)
+    if proc.poll() is not None:
+        print("omprd exited immediately — log:")
+        print((RIG_DIR / "omprd.log").read_text()[-2000:])
+        sys.exit(1)
+    print(f"omprd up (pid {proc.pid}) — log: ~/.rig/omprd.log")
+    print(f"bind: {advertised_ip()}:{DEFAULT_PORT}")
+    print("pair: ompr pair")
+    print("tip: ompr up --service  →  keeps omprd running across reboots")
+
+
+# --- boot persistence ---------------------------------------------------
+# `ompr up --service` installs omprd as a per-OS service so the rig stays
+# reachable across reboots: launchd on macOS, systemd --user on Linux,
+# schtasks on Windows. The daemon args are frozen at install time.
+def install_service(bin_path, omp, extra):
+    cmdline = " ".join([str(bin_path), "--omp-bin", omp] + list(extra))
+    plat = sys.platform
+
+    if plat == "darwin":
+        plist = Path.home() / "Library" / "LaunchAgents" / "ai.remote.omprd.plist"
+        plist.write_text(f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>Label</key><string>ai.remote.omprd</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/bin/caffeinate</string><string>-s</string>
+    <string>{bin_path}</string><string>--omp-bin</string><string>{omp}</string>
+    {"".join(f"<string>{a}</string>" for a in extra)}
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{RIG_DIR}/omprd.log</string>
+  <key>StandardErrorPath</key><string>{RIG_DIR}/omprd.log</string>
+</dict></plist>""")
+        RIG_DIR.mkdir(exist_ok=True)
+        subprocess.run(["launchctl", "unload", str(plist)], capture_output=True)
+        r = subprocess.run(["launchctl", "load", str(plist)], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"launchctl load failed: {r.stderr.strip()}")
+            sys.exit(1)
+        print(f"installed + started: {plist}")
+    elif plat.startswith("linux"):
+        if not shutil.which("systemctl"):
+            print("no systemd — run ompr up in the foreground")
+            sys.exit(1)
+        unit_dir = Path.home() / ".config" / "systemd" / "user"
+        unit_dir.mkdir(parents=True, exist_ok=True)
+        unit = unit_dir / "omprd.service"
+        inhibit = ("systemd-inhibit --what=sleep:idle:handle-lid-switch "
+                   '--why="remote rig" --mode=block ') if shutil.which("systemd-inhibit") else ""
+        unit.write_text(f"""[Unit]
+Description=Remote rig daemon (omprd)
+After=network-online.target
+
+[Service]
+ExecStart={inhibit}{cmdline}
+Restart=always
+RestartSec=3
+Environment=HOME={Path.home()}
+
+[Install]
+WantedBy=default.target
+""")
+        subprocess.run(["systemctl", "--user", "daemon-reload"])
+        r = subprocess.run(["systemctl", "--user", "enable", "--now", "omprd"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"systemctl failed: {r.stderr.strip()}")
+            sys.exit(1)
+        # survive logout without a login session
+        subprocess.run(["loginctl", "enable-linger"], capture_output=True)
+        print(f"installed + started: {unit} (linger on)")
+    elif plat in ("win32", "cygwin"):
+        r = subprocess.run([
+            "schtasks", "/create", "/f", "/sc", "onlogon",
+            "/tn", "RemoteOmprd", "/tr", cmdline,
+        ], capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"schtasks failed: {r.stderr.strip()}")
+            sys.exit(1)
+        subprocess.run(["schtasks", "/run", "/tn", "RemoteOmprd"], capture_output=True)
+        print("installed + started: scheduled task RemoteOmprd (runs at logon)")
+    else:
+        print(f"no service recipe for {plat} — run ompr up in the foreground")
+        sys.exit(1)
+    print(f"bind: {advertised_ip()}:{DEFAULT_PORT} · logs: ~/.rig/omprd.log")
+    print("pair: ompr pair")
+
+
+def cmd_stayawake(args):
+    """Keep the rig reachable with the lid closed — the software solve."""
+    plat = sys.platform
+    if plat == "darwin":
+        # caffeinate can't stop lid-close sleep; macOS needs the one-time
+        # pmset override (admin once, free, persists across reboots)
+        print("lid-closed rig on macOS:")
+        print("  sudo pmset -a disablesleep 1     # lid closed stays awake (one-time)")
+        print("  # undo later with: sudo pmset -a disablesleep 0")
+        r = subprocess.run(["sudo", "-n", "pmset", "-a", "disablesleep", "1"],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            print("applied: disablesleep is ON")
+        else:
+            print("\nrun the sudo line yourself once — omprd's sleep assertion")
+            print("already prevents idle sleep whenever a session is active.")
+    elif plat.startswith("linux"):
+        # the daemon is spawned under systemd-inhibit in cmd_up — nothing to
+        # persist; drop lid-switch handling into logind for the whole box.
+        print("lid-closed rig on Linux:")
+        print("  ompr up already wraps omprd in systemd-inhibit (sleep+lid)")
+        print("  whole-box lid ignore:")
+        print("    sudo mkdir -p /etc/systemd/logind.conf.d")
+        print("    echo 'HandleLidSwitch=ignore' | sudo tee /etc/systemd/logind.conf.d/remote.conf")
+        print("    sudo systemctl restart systemd-logind")
+    elif plat in ("win32", "cygwin"):
+        # lid-close action → do nothing (per-scheme, usually no admin needed)
+        r = subprocess.run(["powercfg", "-setacvalueindex", "SCHEME_CURRENT",
+                            "SUB_BUTTONS", "LIDACTION", "0"],
+                           capture_output=True, text=True)
+        r2 = subprocess.run(["powercfg", "-setactive", "SCHEME_CURRENT"],
+                            capture_output=True, text=True)
+        if r.returncode == 0 and r2.returncode == 0:
+            print("applied: lid-close now does nothing (on AC)")
+            print("omprd also holds ES_AWAYMODE_REQUIRED — no idle sleep while it runs.")
+        else:
+            print("lid-closed rig on Windows:")
+            print("  powercfg -setacvalueindex SCHEME_CURRENT SUB_BUTTONS LIDACTION 0")
+            print("  powercfg -setactive SCHEME_CURRENT")
+            print("run those in an elevated prompt if this shell isn't admin.")
+    else:
+        print(f"no stayawake recipe for {plat}")
+
+
+def cmd_auth(args):
+    omp = omp_bin()
+    if not omp:
+        print("omp not found — run: ompr setup")
+        sys.exit(1)
+    # Host-side login: OAuth happens HERE on the rig; the credential vault
+    # stays on this machine. Phones never see tokens — they read provider
+    # state via rig.authStatus.
+    if args and args[0] == "list":
+        subprocess.run([omp, "auth-broker", "list"])
+        return
+    if not args or args[0] == "login":
+        rest = args[1:] if args else []
+        subprocess.run([omp, "auth-broker", "login"] + rest)
+        return
+    subprocess.run([omp, "auth-broker"] + args)
+
+
+def main():
+    cmds = {
+        "pair": cmd_pair, "status": cmd_status, "unpair": cmd_unpair,
+        "setup": cmd_setup, "up": cmd_up, "auth": cmd_auth,
+        "stayawake": cmd_stayawake,
+    }
+    if len(sys.argv) < 2 or sys.argv[1] not in cmds:
+        print("usage: ompr <setup|up [--service]|pair|auth [list|login <p>]|status|unpair <name>|stayawake>")
+        sys.exit(2)
+    cmds[sys.argv[1]](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()

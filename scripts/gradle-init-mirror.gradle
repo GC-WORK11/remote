@@ -1,0 +1,60 @@
+// Maven-429 defense (shared egress IP gets rate-limited by repo.maven.apache.org).
+// Rewrites Maven Central -> GCS mirror, Gradle Plugin Portal -> aliyun gradle-plugin mirror
+// (portal artifacts 30x into Central; aliyun's gradle-plugin repo mirrors the portal itself).
+// gradlePluginPortal() stays declared: some markers are portal-only and 404 on central mirrors.
+// Verified 2026-10-03 on this box class: zero 429s, assembleRelease ~2.5min.
+
+def GCS = 'https://maven-central.storage-download.googleapis.com/maven2/'
+def ALIYUN_PLUGINS = 'https://maven.aliyun.com/repository/gradle-plugin'
+def ALIYUN_PUBLIC = 'https://maven.aliyun.com/repository/public'
+
+def rewriteRepos = { repos ->
+    repos.all { repo ->
+        if (repo instanceof MavenArtifactRepository) {
+            def u = repo.url.toString()
+            if (u.contains('repo.maven.apache.org') || u.contains('repo1.maven.org') ||
+                u.contains('maven-central.storage-download.googleapis.com')) {
+                repo.setUrl(GCS)
+            } else if (u.contains('plugins.gradle.org')) {
+                repo.setUrl(ALIYUN_PLUGINS)
+            }
+        }
+    }
+}
+
+def ensureFallbacks = { repos ->
+    if (!repos.any { it instanceof MavenArtifactRepository && it.url.toString() == GCS }) {
+        repos.maven { url GCS }
+    }
+    if (!repos.any { it instanceof MavenArtifactRepository && it.url.toString() == ALIYUN_PUBLIC }) {
+        repos.maven { url ALIYUN_PUBLIC }
+    }
+}
+
+def ensurePluginFallbacks = { repos ->
+    ensureFallbacks(repos)
+    if (!repos.any { it instanceof MavenArtifactRepository && it.url.toString() == ALIYUN_PLUGINS }) {
+        repos.maven { url ALIYUN_PLUGINS }
+    }
+}
+
+gradle.beforeSettings { settings ->
+    rewriteRepos(settings.pluginManagement.repositories)
+    ensurePluginFallbacks(settings.pluginManagement.repositories)
+    try {
+        rewriteRepos(settings.dependencyResolutionManagement.repositories)
+        ensureFallbacks(settings.dependencyResolutionManagement.repositories)
+    } catch (Throwable ignored) {}
+}
+
+gradle.projectsLoaded {
+    rewriteRepos(gradle.rootProject.repositories)
+    ensureFallbacks(gradle.rootProject.repositories)
+}
+
+gradle.beforeProject { project ->
+    rewriteRepos(project.repositories)
+    ensureFallbacks(project.repositories)
+    rewriteRepos(project.buildscript.repositories)
+    ensureFallbacks(project.buildscript.repositories)
+}

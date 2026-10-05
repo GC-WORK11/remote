@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- auto-reload picks up a re-minted code written by the launcher -->
+<meta http-equiv="refresh" content="20">
+<title>Pocket Rig — pair your phone</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 0;
+         min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         background: #0b0f14; color: #e8eef5; }
+  .card { text-align: center; padding: 32px 40px; max-width: 560px; }
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; letter-spacing: .2px; }
+  .sub { color: #8fa1b3; font-size: 13px; margin-bottom: 20px; }
+  #qr { background: #fff; padding: 16px; border-radius: 12px; display: inline-block; }
+  #qr canvas { display: block; image-rendering: pixelated; }
+  .uri { margin-top: 18px; font-family: ui-monospace, monospace; font-size: 12px;
+         color: #7dd3fc; word-break: break-all; user-select: all; }
+  .code { margin-top: 10px; font-size: 14px; color: #cbd5e1; }
+  .code b { font-size: 22px; letter-spacing: 4px; color: #fff; font-family: ui-monospace, monospace; }
+  .hint { margin-top: 16px; font-size: 12px; color: #8fa1b3; }
+  .err { color: #fbbf24; font-size: 14px; margin-top: 24px; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Pocket Rig</h1>
+  <div class="sub">Point the Remote app at this code to pair</div>
+  <div id="qr"></div>
+  <div class="uri" id="uri"></div>
+  <div class="code">pair code <b id="code"></b> — valid 10 minutes</div>
+  <div class="hint" id="hint">Open Remote → “Scan QR” and point at the code, or paste the link.</div>
+  <div class="err" id="err" hidden></div>
+</div>
+<script src="pair-config.js"></script>
+<script>
+// QR encoder — byte mode, EC level L, mask 0, versions 1-10.
+// Ported from os-bridge/daemon/qr.hpp (same algorithm, spec-legal output).
+(function () {
+  var K_TOT = [26, 44, 70, 100, 134, 172, 196, 242, 292, 346];
+  var K_ECB = [7, 10, 15, 20, 26, 18, 20, 24, 30, 18];
+  var K_BLK = [1, 1, 1, 1, 1, 2, 2, 2, 2, 4];
+  var K_ALI = [[0,0,0],[6,18,0],[6,22,0],[6,26,0],[6,30,0],
+               [6,34,0],[6,22,38],[6,24,42],[6,26,46],[6,28,50]];
+
+  var GF_EXP = new Uint8Array(512), GF_LOG = new Uint8Array(256);
+  (function initGf() {
+    var x = 1;
+    for (var i = 0; i < 255; i++) {
+      GF_EXP[i] = x; GF_LOG[x] = i; x <<= 1;
+      if (x & 0x100) x ^= 0x11D;
+    }
+    for (var j = 255; j < 512; j++) GF_EXP[j] = GF_EXP[j - 255];
+  })();
+  function gfMul(a, b) { return (a === 0 || b === 0) ? 0 : GF_EXP[GF_LOG[a] + GF_LOG[b]]; }
+
+  function rsGen(deg) {
+    var poly = [1];
+    for (var i = 0; i < deg; i++) {
+      var nxt = new Array(poly.length + 1).fill(0);
+      for (var j = 0; j < poly.length; j++) {
+        nxt[j] ^= gfMul(poly[j], GF_EXP[i]);
+        nxt[j + 1] ^= poly[j];
+      }
+      poly = nxt;
+    }
+    return poly;
+  }
+  function rsRem(data, gen) {
+    var div = gen.slice(0, -1).reverse();
+    var rem = new Array(gen.length - 1).fill(0);
+    for (var k = 0; k < data.length; k++) {
+      var f = data[k] ^ rem[0];
+      rem.shift(); rem.push(0);
+      for (var j = 0; j < rem.length; j++) rem[j] ^= gfMul(div[j], f);
+    }
+    return rem;
+  }
+
+  // returns size x size matrix of 0/1, or null when the payload is too long
+  function qrMatrix(text) {
+    var data = unescape(encodeURIComponent(text)); // UTF-8 octets
+    var bytes = [];
+    for (var i = 0; i < data.length; i++) bytes.push(data.charCodeAt(i));
+    var vi = -1;
+    for (i = 0; i < 10; i++) {
+      var datacw = K_TOT[i] - K_ECB[i] * K_BLK[i];
+      var ccbits = (i + 1 >= 10) ? 16 : 8;
+      if (4 + ccbits + 8 * bytes.length <= datacw * 8) { vi = i; break; }
+    }
+    if (vi < 0) return null;
+    var ver = vi + 1, size = 17 + 4 * ver;
+    var datacw = K_TOT[vi] - K_ECB[vi] * K_BLK[vi];
+
+    var bits = [];
+    function put(val, n) { for (var k = n - 1; k >= 0; k--) bits.push((val >> k) & 1); }
+    put(4, 4); put(bytes.length, ver >= 10 ? 16 : 8);
+    for (i = 0; i < bytes.length; i++) put(bytes[i], 8);
+    var term = datacw * 8 - bits.length;
+    put(0, term < 4 ? term : 4);
+    while (bits.length % 8) bits.push(0);
+    var pad = 0xEC;
+    while (bits.length < datacw * 8) { put(pad, 8); pad ^= 0xEC ^ 0x11; }
+    var codewords = [];
+    for (i = 0; i < bits.length; i += 8) {
+      var w = 0;
+      for (var k = 0; k < 8; k++) w |= bits[i + k] << (7 - k);
+      codewords.push(w);
+    }
+
+    var nb = K_BLK[vi], epb = K_ECB[vi];
+    var shortLen = Math.floor(datacw / nb), nlong = datacw % nb;
+    var blocks = [], pos = 0;
+    for (var b = 0; b < nb; b++) {
+      var ln = shortLen + (b >= nb - nlong ? 1 : 0);
+      blocks.push(codewords.slice(pos, pos + ln)); pos += ln;
+    }
+    var gen = rsGen(epb);
+    var ecs = blocks.map(function (blk) { return rsRem(blk, gen); });
+    var inter = [], maxd = 0;
+    blocks.forEach(function (blk) { maxd = Math.max(maxd, blk.length); });
+    for (i = 0; i < maxd; i++)
+      blocks.forEach(function (blk) { if (i < blk.length) inter.push(blk[i]); });
+    for (i = 0; i < epb; i++)
+      ecs.forEach(function (ec) { inter.push(ec[i]); });
+
+    var m = [], func = [];
+    for (i = 0; i < size; i++) { m.push(new Array(size).fill(-1)); func.push(new Array(size).fill(0)); }
+    function setF(r, c, dark) {
+      if (r >= 0 && r < size && c >= 0 && c < size) { m[r][c] = dark ? 1 : 0; func[r][c] = 1; }
+    }
+    function finder(r, c) {
+      for (var dr = -1; dr < 8; dr++)
+        for (var dc = -1; dc < 8; dc++)
+          setF(r + dr, c + dc,
+            dr >= 0 && dr <= 6 && dc >= 0 && dc <= 6 &&
+            (dr === 0 || dr === 6 || dc === 0 || dc === 6 ||
+             (dr >= 2 && dr <= 4 && dc >= 2 && dc <= 4)));
+    }
+    finder(0, 0); finder(0, size - 7); finder(size - 7, 0);
+    for (i = 8; i < size - 8; i++) { setF(6, i, i % 2 === 0); setF(i, 6, i % 2 === 0); }
+    var ali = K_ALI[vi], nal = 0;
+    while (nal < 3 && ali[nal]) nal++;
+    for (i = 0; i < nal; i++)
+      for (var j = 0; j < nal; j++) {
+        if ((i === 0 && j === 0) || (i === 0 && j === nal - 1) || (i === nal - 1 && j === 0)) continue;
+        var ar = ali[i], ac = ali[j];
+        for (var dr = -2; dr <= 2; dr++)
+          for (var dc = -2; dc <= 2; dc++)
+            setF(ar + dr, ac + dc, Math.max(Math.abs(dr), Math.abs(dc)) !== 1);
+      }
+    for (i = 0; i < 9; i++) if (i !== 6) { setF(8, i, false); setF(i, 8, false); }
+    for (i = 0; i < 8; i++) { setF(8, size - 1 - i, false); setF(size - 1 - i, 8, false); }
+    setF(size - 8, 8, true);
+    if (ver >= 7)
+      for (i = 0; i < 18; i++) {
+        setF(Math.floor(i / 3), size - 11 + i % 3, false);
+        setF(size - 11 + i % 3, Math.floor(i / 3), false);
+      }
+
+    i = 0; var r = size - 1, c = size - 1, up = true;
+    while (c > 0) {
+      if (c === 6) c--;
+      for (k = 0; k < size; k++) {
+        for (var dc = 0; dc < 2; dc++) {
+          var cc = c - dc;
+          if (!func[r][cc]) {
+            m[r][cc] = (i < inter.length * 8) ? ((inter[i >> 3] >> (7 - (i & 7))) & 1) : 0;
+            i++;
+          }
+        }
+        r += up ? -1 : 1;
+      }
+      r += up ? 1 : -1; up = !up; c -= 2;
+    }
+    for (var rr = 0; rr < size; rr++)
+      for (cc = 0; cc < size; cc++)
+        if (!func[rr][cc] && (rr + cc) % 2 === 0) m[rr][cc] ^= 1;
+
+    var d = 8, rem = d; // EC-L (01) + mask 0 -> 0b01000
+    for (k = 0; k < 10; k++) rem = (rem << 1) ^ (((rem >> 9) & 1) * 0x537);
+    var fbits = ((d << 10) | rem) ^ 0x5412;
+    for (k = 0; k < 6; k++) setF(k, 8, (fbits >> k) & 1);
+    setF(7, 8, (fbits >> 6) & 1);
+    setF(8, 8, (fbits >> 7) & 1);
+    setF(8, 7, (fbits >> 8) & 1);
+    for (k = 9; k < 15; k++) setF(8, 14 - k, (fbits >> k) & 1);
+    for (k = 0; k < 8; k++) setF(8, size - 1 - k, (fbits >> k) & 1);
+    for (k = 8; k < 15; k++) setF(size - 15 + k, 8, (fbits >> k) & 1);
+    if (ver >= 7) {
+      rem = ver;
+      for (k = 0; k < 12; k++) rem = (rem << 1) ^ (((rem >> 11) & 1) * 0x1F25);
+      var vbits = (ver << 12) | rem;
+      for (k = 0; k < 18; k++) {
+        var bit = (vbits >> k) & 1;
+        setF(Math.floor(k / 3), size - 11 + k % 3, bit);
+        setF(size - 11 + k % 3, Math.floor(k / 3), bit);
+      }
+    }
+    return m;
+  }
+
+  var cfg = window.PAIR || {};
+  var uriEl = document.getElementById('uri');
+  var codeEl = document.getElementById('code');
+  var errEl = document.getElementById('err');
+  if (!cfg.uri) {
+    errEl.hidden = false;
+    errEl.textContent = 'No pairing config found — run the Pocket Rig installer to mint a code.';
+    return;
+  }
+  uriEl.textContent = cfg.uri;
+  codeEl.textContent = cfg.code || '------';
+  var mat = qrMatrix(cfg.uri);
+  if (!mat) {
+    errEl.hidden = false;
+    errEl.textContent = 'Payload too long for a QR — paste the link in the app instead.';
+    return;
+  }
+  var n = mat.length, scale = 6, quiet = 4;
+  var cv = document.createElement('canvas');
+  cv.width = cv.height = (n + quiet * 2) * scale;
+  var ctx = cv.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = '#000';
+  for (var y = 0; y < n; y++)
+    for (var x = 0; x < n; x++)
+      if (mat[y][x]) ctx.fillRect((x + quiet) * scale, (y + quiet) * scale, scale, scale);
+  document.getElementById('qr').appendChild(cv);
+  if (cfg.expires) {
+    var hint = document.getElementById('hint');
+    var secs = Math.max(0, cfg.expires - Math.floor(Date.now() / 1000));
+    hint.textContent = 'Open Remote → “Scan QR” and point at the code, or paste the link. ' +
+      'Code expires in ~' + Math.floor(secs / 60) + 'm ' + (secs % 60) + 's — the page refreshes if a new one is minted.';
+  }
+})();
+</script>
+</body>
+</html>

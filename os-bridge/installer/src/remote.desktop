@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Pocket Rig — Pair
+Comment=Start the Pocket Rig daemon and show the pairing QR
+Exec=@PREFIX@/remote-pair
+Icon=smartphone
+Terminal=false
+Categories=Development;
