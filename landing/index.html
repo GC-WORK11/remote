@@ -3,548 +3,449 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Remote — your laptop is the computer</title>
-<meta name="description" content="A small daemon turns your laptop into a rig; your phone becomes the remote. Agents do real work — files, apps, terminals, browsers, code — while the lid stays closed.">
-<link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
-<meta name="theme-color" content="#F7F5F0">
-<meta property="og:type" content="website">
-<meta property="og:title" content="Remote — your laptop is the computer">
-<meta property="og:description" content="A small daemon turns the machine on your desk into a rig. Pair once — then agents do real work on it. Lid closed. You on the couch.">
+<title>Remote — code from your phone</title>
+<meta name="description" content="Remote lets you code from your phone. Your laptop does the work — with the lid closed. Your subscriptions, no cloud between them. Free and open source.">
+<meta property="og:title" content="Remote — code from your phone">
+<meta property="og:description" content="Your laptop does the work. Your phone is the remote. Close the lid, keep working — free and open source.">
 <meta property="og:image" content="assets/og.png">
-<meta property="og:image:width" content="1200">
-<meta property="og:image:height" content="630">
-<meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Remote — your laptop is the computer">
-<meta name="twitter:description" content="Agents do real work on your machine — files, apps, terminals, browsers, code — while the lid stays closed.">
-<meta name="twitter:image" content="assets/og.png">
+<link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<link href="https://api.fontshare.com/v2/css?f[]=clash-display@500,600&f[]=satoshi@400,500,700&f[]=gambetta@300,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
-  :root{
-    --bg:#F7F5F0; --bg2:#F0EDE6; --ink:#14120F; --sub:#6E6960; --faint:#ADA79C;
-    --line:rgba(20,18,15,.09); --line2:rgba(20,18,15,.16);
-    --rose:#C93B6E; --petal:#EF6FA4; --coral:#FF5A3C; --leaf:#5E9A6E;
-    --card:#FCFBF8; --dark:#171511; --dark2:#211E19;
-    --r-lg:26px;
-    --serif:"New York",ui-serif,"SF Pro Display",Georgia,serif;
-    --sans:-apple-system,"SF Pro Text","Helvetica Neue",Inter,system-ui,sans-serif;
-    --mono:ui-monospace,"SF Mono","SFMono-Regular",Menlo,monospace;
-  }
-  *{margin:0;padding:0;box-sizing:border-box}
-  html{scroll-behavior:smooth}
-  body{background:var(--bg);color:var(--ink);font-family:var(--sans);
-    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;overflow-x:hidden}
-  ::selection{background:var(--rose);color:#fff}
-  a{color:inherit;text-decoration:none}
-  .wrap{max-width:1240px;margin:0 auto;padding:0 36px}
-  .mono{font-family:var(--mono)}
+:root{
+  --paper:#faf9f7; --card:#ffffff;
+  --ink:#131314; --ink2:#5b5b60; --ink3:#9a9aa0;
+  --line:rgba(19,19,20,.09); --line2:rgba(19,19,20,.16);
+  --accent:#b9894e; --accent-soft:rgba(185,137,78,.09);
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --disp:"Clash Display",system-ui,sans-serif;
+  --body:"Satoshi",-apple-system,system-ui,sans-serif;
 
-  /* ——— nav — hairline ——— */
-  nav{position:sticky;top:0;z-index:60;border-bottom:1px solid var(--line);
-    backdrop-filter:saturate(1.35) blur(14px);background:color-mix(in srgb,var(--bg) 78%,transparent)}
-  .nav-in{display:flex;align-items:center;justify-content:space-between;height:64px}
-  .brand{display:flex;align-items:center;gap:9px;font-weight:700;letter-spacing:-.02em;font-size:15.5px}
-  .nav-links{display:flex;gap:34px;font-size:13px;color:var(--sub)}
-  .nav-links a{transition:color .2s}
-  .nav-links a:hover{color:var(--ink)}
-  .nav-cta{font-size:12.5px;font-weight:600;background:var(--ink);color:var(--bg);
-    padding:9px 18px;border-radius:999px;transition:transform .2s,background .2s}
-  .nav-cta:hover{background:var(--rose);transform:translateY(-1px)}
-  @media (max-width:840px){.nav-links{display:none}}
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+::selection{background:var(--accent);color:#fff}
+a{color:inherit;text-decoration:none}
+img,video{display:block;max-width:100%}
+.wrap{max-width:1140px;margin:0 auto;padding:0 24px}
+.mono{font-family:var(--mono);font-size:11px;font-weight:500;letter-spacing:.16em;text-transform:uppercase;color:var(--ink3)}
+.mono b{color:var(--accent);font-weight:500}
 
-  /* ——— hero — centered editorial; meadow confined to a low field band,
-     ASCII aether drifts faintly behind the type ——— */
-  .hero{position:relative;min-height:100svh;display:flex;flex-direction:column;
-    align-items:center;text-align:center;overflow:hidden;padding:0 24px}
-  #aether{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:0}
-  .field{position:relative;width:100%;height:26vh;min-height:190px;z-index:1;
-    margin-top:auto;flex:none;
-    -webkit-mask-image:linear-gradient(to bottom,transparent,black 34%);
-    mask-image:linear-gradient(to bottom,transparent,black 34%);pointer-events:none}
-  #meadow{position:absolute;inset:0;width:100%;height:100%}
-  .hero-in{position:relative;z-index:2;max-width:1060px;margin:auto 0;padding:10vh 20px 6vh}
-  .hero-mark{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);
-    font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--sub);margin-bottom:34px}
-  .hero h1{font-family:var(--serif);font-weight:600;font-size:clamp(52px,7.6vw,118px);
-    line-height:.98;letter-spacing:-.034em}
-  .hero h1 em{font-style:italic;color:var(--rose)}
-  .hero .lede{font-size:clamp(16px,1.5vw,19px);line-height:1.66;color:var(--sub);
-    max-width:56ch;margin:30px auto 0}
-  .cta{display:flex;gap:14px;justify-content:center;margin-top:40px;flex-wrap:wrap}
-  .btn{font-size:14px;font-weight:600;padding:14px 28px;border-radius:999px;
-    transition:transform .2s cubic-bezier(.2,.6,.2,1),box-shadow .2s,background .2s;display:inline-block}
-  .btn.primary{background:var(--ink);color:var(--bg);box-shadow:0 14px 34px -14px rgba(20,18,15,.5)}
-  .btn.primary:hover{background:var(--rose);transform:translateY(-2px);box-shadow:0 18px 40px -14px rgba(201,59,110,.45)}
-  .btn.ghost{border:1px solid var(--line2);color:var(--ink);background:rgba(252,251,248,.6)}
-  .btn.ghost:hover{border-color:var(--ink);transform:translateY(-2px)}
-  .trust{margin-top:22px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--faint)}
-  /* ——— strip — film of real shots, infinite scroll ——— */
-  .strip{padding:0 0 130px;overflow:hidden}
-  .strip-rail{display:flex;gap:22px;width:max-content;animation:rail 46s linear infinite;
-    padding:0 11px}
-  .strip-rail:hover{animation-play-state:paused}
-  .strip img{height:min(560px,58vh);border-radius:22px;border:1px solid var(--line2);
-    box-shadow:0 26px 60px -28px rgba(20,18,15,.3);display:block}
-  @keyframes rail{to{transform:translateX(-50%)}}
-  @media (prefers-reduced-motion:reduce){.strip-rail{animation:none}.reveal{opacity:1;transform:none}}
 
-  .scroll-hint{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);z-index:2;
-    font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;color:var(--faint);text-transform:uppercase;
-    animation:bob 3.2s ease-in-out infinite}
-  @keyframes bob{50%{transform:translate(-50%,6px)}}
-  /* short viewports: shrink the headline + field so type never meets flora */
-  @media (max-height:860px){
-    .hero h1{font-size:clamp(46px,9.5vh,76px)}
-    .hero .lede{margin-top:22px}
-    .hero-mark{margin-bottom:22px}
-    .cta{margin-top:28px}
-    .hero-in{padding-top:7vh;padding-bottom:4vh}
-    .field{height:22vh;min-height:150px}
-  }
 
-  /* ——— product moment — the real thread in a phone, annotated ——— */
-  .moment{position:relative;padding:140px 0 60px;overflow:hidden}
-  .moment-head{text-align:center;margin-bottom:80px}
-  .kicker{font-family:var(--mono);font-size:11px;letter-spacing:.26em;text-transform:uppercase;
-    color:var(--rose);margin-bottom:22px}
-  h2{font-family:var(--serif);font-weight:600;font-size:clamp(38px,4.8vw,66px);
-    line-height:1.02;letter-spacing:-.03em}
-  .lede{font-size:16.5px;line-height:1.66;color:var(--sub);max-width:54ch;margin:22px auto 0}
-  .stage{position:relative;display:flex;justify-content:center;align-items:center;gap:0}
-  .phone{position:relative;width:min(330px,72vw);aspect-ratio:1206/2622;background:#1c1a17;
-    border-radius:56px;padding:11px;box-shadow:
-      0 60px 120px -40px rgba(20,18,15,.38),
-      0 24px 50px -24px rgba(20,18,15,.22),
-      inset 0 0 0 1.5px rgba(255,255,255,.08)}
-  .phone img{width:100%;height:100%;object-fit:cover;border-radius:46px;display:block}
-  .notch{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:34%;height:26px;
-    background:#1c1a17;border-radius:0 0 18px 18px;z-index:3}
-  .chip{position:absolute;z-index:4;display:flex;align-items:center;gap:9px;background:rgba(252,251,248,.92);
-    border:1px solid var(--line2);border-radius:14px;padding:10px 14px;font-size:12.5px;font-weight:600;
-    box-shadow:0 14px 34px -16px rgba(20,18,15,.25);backdrop-filter:blur(8px);white-space:nowrap;
-    animation:float 6s ease-in-out infinite}
-  .chip small{display:block;font-weight:400;color:var(--sub);font-size:11px;margin-top:1px}
-  .chip .mini{width:18px;height:18px;flex:none}
-  .chip .dot-ok{width:7px;height:7px;border-radius:50%;background:#2FA968;flex:none;margin-left:2px}
-  .chip-l{right:calc(50% + 190px)}
-  .chip-r{left:calc(50% + 190px)}
-  @keyframes float{50%{transform:translateY(-9px)}}
-  @media (max-width:1000px){
-    .chip{position:static;margin:8px auto;white-space:normal}
-    .chips{display:flex;flex-wrap:wrap;justify-content:center;max-width:420px;margin:36px auto 0}
-  }
-  @media (min-width:1001px){.chips{position:absolute;inset:0;pointer-events:none}}
+/* ---------- hero: the painting IS the hero ---------- */
+.hero{background:#0b0a09;position:relative}
+.hero-art{line-height:0;overflow:hidden;animation:heroIn 1.1s var(--ease) both}
+.hero-art>img.art{width:100%;height:100vh;height:100svh;object-fit:cover;object-position:50% 58%;display:block;transform-origin:50% 46%;animation:drift 24s ease-in-out 1.2s infinite alternate}
+@keyframes drift{from{transform:scale(1) translateY(0)}to{transform:scale(1.06) translateY(-16px)}}
+@keyframes heroIn{from{opacity:0;transform:scale(1.015)}to{opacity:1;transform:none}}
+.hero-word{position:absolute;top:13%;left:0;right:0;text-align:center;z-index:3;pointer-events:none;font-family:"Gambetta",Georgia,serif;font-weight:300;font-size:clamp(54px,8vw,108px);letter-spacing:.02em;color:#f6f0e2;text-shadow:0 4px 40px rgba(0,0,0,.4);opacity:0;animation:heroWord 2.8s var(--ease) 7.2s forwards}
+@keyframes heroWord{from{opacity:0;transform:translateY(20px)}to{opacity:.94;transform:none}}
+/* the painting's mascots wake, play, notice the philosophers, and become the artwork */
+.pm{position:absolute;inset:0;z-index:1;opacity:0;animation-name:drift,pShow;animation-duration:24s,.8s;animation-timing-function:ease-in-out,var(--ease);animation-delay:1.2s,6.4s;animation-fill-mode:both,forwards;animation-iteration-count:infinite,1;animation-direction:alternate,normal}
+.pm.p1{clip-path:circle(46px at var(--m1x,24.6%) var(--m1y,34.4%))}
+.pm.p2{clip-path:circle(50px at var(--m2x,57.3%) var(--m2y,62%))}
+.pm.p3{clip-path:circle(46px at var(--m3x,91%) var(--m3y,66%))}
+@keyframes pShow{to{opacity:1}}
+@keyframes blobFade{to{opacity:0}}
+.blob{position:absolute;z-index:4;width:86px;pointer-events:none;transform-origin:50% 88%;filter:drop-shadow(0 14px 18px rgba(0,0,0,.42))}
+.blob.b2{width:124px}
+.blob.b1{left:calc(var(--m1x,21.6%) - 43px);top:calc(var(--m1y,27.6%) - 43px);animation:b1 6.6s cubic-bezier(.35,.05,.3,1) .6s both,blobFade .7s ease 6.4s forwards}
+.blob.b2{left:calc(var(--m2x,53%) - 62px);top:calc(var(--m2y,55%) - 62px);animation:b2 6.6s cubic-bezier(.35,.05,.3,1) .9s both,blobFade .7s ease 6.55s forwards}
+.blob.b3{left:calc(var(--m3x,88%) - 43px);top:calc(var(--m3y,60%) - 43px);animation-name:b3,blobFade;animation-duration:6.6s,.7s;animation-timing-function:cubic-bezier(.35,.05,.3,1),ease;animation-delay:.75s,6.7s;animation-fill-mode:both,forwards;animation-iteration-count:1,1}
+@keyframes b1{ /* indigo — pops up, hops left+right, notices, drifts home */
+ 0%{transform:scale(0);opacity:0}
+ 4%{transform:scale(1.12) rotate(-5deg);opacity:1}7%{transform:scale(1)}
+ 16%{transform:translate(6vw,-9vh) rotate(6deg)}
+ 26%{transform:translate(12vw,-4vh) scaleY(.9) rotate(-4deg)}
+ 30%{transform:scale(1)}
+ 40%{transform:translate(16vw,-11vh) rotate(5deg)}
+ 50%{transform:translate(10vw,-7vh) rotate(-3deg)}
+ 62%{transform:translate(5vw,-5vh) rotate(2deg) scale(1.04)}   /* leans in, curious */
+ 74%{transform:translate(2vw,-2vh) rotate(1deg) scale(1.02)}
+ 88%,100%{transform:translate(0,0) scale(1.02)}}
+@keyframes b2{ /* laptop rose — the ringleader, big bounce then drifts to the laptop edge */
+ 0%{transform:scale(0);opacity:0}
+ 4%{transform:scale(1.14) rotate(4deg);opacity:1}7%{transform:scale(1)}
+ 15%{transform:translate(-10vw,-10vh) rotate(-5deg)}
+ 25%{transform:translate(-16vw,-2vh) scaleY(.9) rotate(4deg)}
+ 29%{transform:scale(1)}
+ 40%{transform:translate(-6vw,-14vh) rotate(-4deg)}
+ 50%{transform:translate(4vw,-9vh) rotate(3deg)}
+ 62%{transform:translate(1vw,-4vh) rotate(1deg) scale(1.03)}   /* leans in */
+ 74%{transform:translate(0,-1vh) scale(.82)}
+ 88%,100%{transform:translate(0,0) scale(.78)}}
+@keyframes b3{ /* right rose — chases b1, pauses, drifts to the books */
+ 0%{transform:scale(0);opacity:0}
+ 4%{transform:scale(1.12) rotate(6deg);opacity:1}7%{transform:scale(1)}
+ 17%{transform:translate(-9vw,-6vh) rotate(-6deg)}
+ 29%{transform:translate(-18vw,-11vh) scaleY(.9) rotate(4deg)}
+ 33%{transform:scale(1)}
+ 44%{transform:translate(-26vw,-8vh) rotate(-4deg)}
+ 54%{transform:translate(-14vw,-4vh) rotate(3deg)}
+ 64%{transform:translate(-5vw,-2vh) scale(1.03) rotate(1deg)}  /* curious pause */
+ 78%{transform:translate(-1vw,-1vh) scale(.94)}
+ 90%,100%{transform:translate(0,0) scale(.92)}}
+.hero-flicker{position:absolute;inset:0;z-index:2;pointer-events:none;background:radial-gradient(30% 24% at 50% 60%,rgba(255,186,105,.15),transparent 68%);opacity:.5;animation:flick 7s ease-in-out infinite}
+@keyframes flick{0%,100%{opacity:.55}18%{opacity:.36}31%{opacity:.62}52%{opacity:.44}70%{opacity:.58}86%{opacity:.4}}
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.btn{font-size:14.5px;font-weight:500;padding:13px 26px;border-radius:9px;transition:all .25s var(--ease);cursor:pointer;display:inline-flex;align-items:center;gap:8px}
+.btn:active{transform:translateY(0) scale(.97);transition-duration:.1s}
 
-  /* ——— modes — full-bleed panels ——— */
-  .modes-sec{background:var(--bg2);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-  section{padding:130px 0}
-  .modes{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-top:70px}
-  @media (max-width:860px){.modes{grid-template-columns:1fr}}
-  .mode{border-radius:var(--r-lg);padding:52px 46px 0;overflow:hidden;position:relative;
-    transition:transform .4s cubic-bezier(.2,.6,.2,1)}
-  .mode:hover{transform:translateY(-6px)}
-  .mode.dark{background:var(--dark);color:#F3EFE9}
-  .mode.light{background:var(--card);border:1px solid var(--line)}
-  .mode .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.22em;text-transform:uppercase}
-  .mode.dark .tag{color:var(--petal)}
-  .mode.light .tag{color:var(--rose)}
-  .mode h3{font-family:var(--serif);font-size:31px;letter-spacing:-.025em;font-weight:600;margin:16px 0 14px}
-  .mode p{font-size:15px;line-height:1.65}
-  .mode.dark p{color:#A39D94}
-  .mode.light p{color:var(--sub)}
-  .mode .shot{margin:34px -46px -90px;display:flex;justify-content:center}
-  .mode .shot img{width:76%;border-radius:20px 20px 0 0;
-    box-shadow:0 -20px 60px -18px rgba(0,0,0,.45);transition:transform .5s cubic-bezier(.2,.6,.2,1)}
-  .mode:hover .shot img{transform:translateY(-8px)}
-  .mode.light .shot img{box-shadow:0 -16px 44px -16px rgba(0,0,0,.16);border:1px solid var(--line);border-bottom:0}
+/* ---------- fan: angled phones + mascot confetti ---------- */
+.fan{position:relative;min-height:104vh;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#f6f1e8;padding:8vh 0}
+.fan .wrap2{position:relative;width:min(1040px,94vw);height:min(76vh,720px);margin:0 auto}
+.fan .shot{position:absolute;left:50%;top:52%;width:min(268px,58vw);will-change:transform;transition:transform .6s var(--ease)}
+.fan .shot .bezel{border-radius:46px;background:#111;padding:10px;box-shadow:0 34px 90px rgba(19,19,20,.22),0 0 0 1px rgba(19,19,20,.3)}
+.fan .shot .screen{border-radius:37px;overflow:hidden;position:relative;background:#fff}
+.fan .shot .island{position:absolute;top:11px;left:50%;transform:translateX(-50%);width:72px;height:20px;background:#111;border-radius:10px;z-index:2}
+.fan .shot img{width:100%;display:block}
+.fan .f1{transform:translate(-144%,-50%) rotate(-9deg);z-index:1}
+.fan .f2{transform:translate(-50%,-56%) rotate(2deg);z-index:3;width:min(292px,62vw)}
+.fan .f3{transform:translate(44%,-48%) rotate(9deg);z-index:2}
+.fan .shot:hover{transform:translate(-50%,-56%) rotate(0deg);z-index:5}
+.fan .f1:hover{transform:translate(-144%,-56%) rotate(-2deg)}
+.fan .f3:hover{transform:translate(44%,-56%) rotate(2deg)}
+@media(max-width:860px){.fan{min-height:auto;padding:14vh 0}.fan .wrap2{height:auto;display:flex;flex-direction:column;align-items:center;gap:26px}.fan .shot{position:static;transform:none!important;width:min(250px,74vw)}.fan .f2{width:min(262px,78vw)}}
+.buddy{position:absolute;z-index:4;pointer-events:none;animation:float 9s ease-in-out infinite alternate}
+.mgroup{display:block;width:min(300px,64vw);margin:0 auto 26px;animation:float 10s ease-in-out infinite alternate;will-change:transform}
+@keyframes float{from{transform:translateY(0) rotate(var(--r,0deg))}to{transform:translateY(-14px) rotate(var(--r,0deg))}}
 
-  /* ——— moat — dark break, terminal + qr ——— */
-  .moat-sec{padding:60px 0 130px}
-  .moat{background:var(--dark);color:#F3EFE9;border-radius:32px;overflow:hidden}
-  .moat-in{display:grid;grid-template-columns:1fr 1.05fr}
-  @media (max-width:940px){.moat-in{grid-template-columns:1fr}}
-  .moat-copy{padding:72px 60px}
-  .moat-copy .kicker{color:var(--petal)}
-  .moat-copy h2{color:#F3EFE9}
-  .moat-copy p{color:#A39D94;font-size:15.5px;line-height:1.68;margin-top:22px;max-width:44ch}
-  .term{background:var(--dark2);border-left:1px solid rgba(255,255,255,.07);
-    font-family:var(--mono);font-size:12.5px;line-height:2.0;padding:60px 44px;
-    color:#C8C2B8;overflow:auto;white-space:pre-wrap}
-  .term .c{color:#7E766A}
-  .term .g{color:#8BCF9B}
-  .term .r{color:var(--petal)}
-  .term .qr{line-height:1.18;letter-spacing:.05em;color:#EDEAE4;display:block;margin:8px 0}
-  .term .qr b{color:var(--dark2);background:#EDEAE4;font-weight:400}
+/* ---------- sections ---------- */
+section{padding:120px 0}
+.sec-head{max-width:640px;margin-bottom:64px}
+.sec-head.center{margin-left:auto;margin-right:auto;text-align:center}
+.sec-head .mono{display:block;margin-bottom:20px}
+h2{font-family:var(--disp);font-weight:600;font-size:clamp(32px,4.4vw,52px);letter-spacing:-.025em;line-height:1.06}
+h2 em{font-style:normal;color:inherit}
+.sec-head p{margin-top:18px;color:var(--ink2);font-size:16.5px;max-width:56ch}
+.sec-head.center p{margin-left:auto;margin-right:auto}
 
-  /* ——— install ——— */
-  .install{text-align:center;padding-top:40px}
-  .cmdline{display:inline-flex;align-items:center;gap:18px;background:var(--ink);
-    border-radius:14px;padding:20px 28px;font-family:var(--mono);font-size:13px;color:#EDEAE4;
-    margin-top:44px;box-shadow:0 20px 50px -16px rgba(20,18,15,.4);
-    max-width:min(92vw,860px);overflow:auto;white-space:nowrap;text-align:left}
-  .cmdline .p{color:var(--petal)}
-  .cmdline button{background:rgba(255,255,255,.1);border:0;color:#EDEAE4;font-family:var(--mono);
-    font-size:11.5px;padding:8px 16px;border-radius:8px;cursor:pointer;letter-spacing:.05em}
-  .cmdline button:hover{background:rgba(255,255,255,.22)}
-  .install .note{font-family:var(--mono);font-size:12px;color:var(--faint);margin-top:20px}
+/* ---------- see it work ---------- */
+.see .grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,380px);gap:72px;align-items:center}
+.see-copy h3{font-family:var(--disp);font-weight:600;font-size:clamp(26px,3vw,38px);letter-spacing:-.02em;line-height:1.12;margin-bottom:16px}
+.see-copy p{color:var(--ink2);font-size:15.5px;max-width:42ch}
+.see-copy ul{list-style:none;margin-top:26px}
+.see-copy li{color:var(--ink2);font-size:14.5px;padding:12px 0;border-top:1px solid var(--line);display:flex;gap:12px;align-items:baseline}
+.see-copy li::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--accent);flex:none;transform:translateY(-1px)}
+.demo{position:relative;width:min(392px,84vw);margin:0 auto}
+.demo .bezel{border-radius:44px;background:#111;padding:10px;box-shadow:0 44px 110px rgba(19,19,20,.26),0 0 0 1px rgba(19,19,20,.3);transition:transform .5s var(--ease)}
+.demo:hover .bezel{transform:scale(1.016)}
+.demo .screen{border-radius:32px;overflow:hidden;position:relative}
+.demo video{width:100%;aspect-ratio:440/622;object-fit:cover}
+.demo video{cursor:pointer}
+.demo figcaption{margin-top:16px;text-align:center}
+@media(max-width:900px){.see .grid{grid-template-columns:minmax(0,1fr);gap:52px}.see-copy{order:2}}
 
-  /* ——— footer ——— */
-  footer{border-top:1px solid var(--line);padding:56px 0 70px}
-  .foot{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:20px}
-  .foot .l{font-size:13px;color:var(--sub)}
-  .foot .r{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.1em}
+/* ---------- how it works ---------- */
+.how{background:var(--card);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:0;border:1px solid var(--line);border-radius:20px;overflow:hidden;background:var(--paper)}
+.step{padding:40px 34px;background:var(--card);transition:transform .35s var(--ease)}
+.step:hover{transform:translateY(-3px)}
+.step+.step{border-left:1px solid var(--line)}
+.step .sn{font-family:var(--mono);font-size:11px;color:var(--accent);letter-spacing:.16em;display:block;margin-bottom:22px}
+.step h4{font-family:var(--disp);font-size:21px;font-weight:600;letter-spacing:-.01em;margin-bottom:10px}
+.step p{color:var(--ink2);font-size:14px;line-height:1.55}
+.step .visual{margin-top:26px;border-radius:12px;border:1px solid var(--line);overflow:hidden;background:var(--paper)}
+.step .visual img{width:100%;height:150px;object-fit:cover;object-position:top}
+.step .visual code{display:block;font-family:var(--mono);font-size:11.5px;padding:16px 18px;color:var(--ink);height:150px;overflow:hidden;line-height:1.9;white-space:pre-wrap;word-break:break-word}
+.step .visual code b{color:var(--accent);font-weight:500}
+@media(max-width:900px){.steps{grid-template-columns:minmax(0,1fr)}.step+.step{border-left:none;border-top:1px solid var(--line)}}
 
-  .reveal{opacity:0;transform:translateY(28px);transition:opacity .9s cubic-bezier(.2,.6,.2,1),transform .9s cubic-bezier(.2,.6,.2,1)}
-  .reveal.in{opacity:1;transform:none}
-  code{font-family:var(--mono);font-size:.88em;background:var(--bg2);
-    padding:2px 7px;border-radius:6px;border:1px solid var(--line)}
+/* ---------- features ---------- */
+.cells{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:20px;overflow:hidden;background:var(--line);gap:1px}
+.cell{background:var(--card);padding:30px 28px 34px;transition:transform .35s var(--ease)}
+.cell:hover{transform:translateY(-4px)}
+.cell .thumb{height:170px;border-radius:12px;border:1px solid var(--line);overflow:hidden;margin-bottom:22px;background:var(--paper)}
+.cell .thumb img{width:100%;height:100%;object-fit:cover;object-position:top;transition:transform .6s var(--ease)}
+.cell:hover .thumb img{transform:scale(1.03)}
+.cell h4{font-family:var(--disp);font-size:18.5px;font-weight:600;letter-spacing:-.01em;margin-bottom:7px}
+.cell p{color:var(--ink2);font-size:13.5px;line-height:1.5}
+@media(max-width:900px){.cells{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- numbers ---------- */
+.nums{border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--card)}
+.nums-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:0}
+.num{padding:0 26px}
+.num+.num{border-left:1px solid var(--line)}
+.num .v{font-family:var(--mono);font-size:clamp(30px,3.4vw,44px);font-weight:500;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.num .v i{font-style:normal;color:var(--accent);font-size:.6em;margin-left:2px}
+.num .k{font-size:12.5px;color:var(--ink3);margin-top:12px;line-height:1.5}
+.nums .bench-link{display:inline-block;margin-top:52px;font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--ink2);border-bottom:1px solid var(--line2);padding-bottom:3px;transition:color .2s,border-color .2s}
+.nums .bench-link:hover{color:var(--ink);border-color:var(--ink)}
+@media(max-width:900px){.nums-grid{grid-template-columns:1fr 1fr;gap:40px 0}.num:nth-child(3){border-left:none}}
+
+/* ---------- get it ---------- */
+.get .grid{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr);gap:64px;align-items:start}
+.cmds{display:flex;flex-direction:column;gap:14px;min-width:0}
+.cmd{border:1px solid var(--line);border-radius:14px;background:var(--card);padding:20px 22px;min-width:0;overflow:hidden;transition:border-color .25s,transform .25s var(--ease)}
+.cmd:hover{border-color:var(--line2);transform:translateY(-2px)}
+.cmd .n{font-family:var(--mono);font-size:10.5px;color:var(--accent);letter-spacing:.16em;display:block;margin-bottom:12px}
+.cmd code{display:block;font-family:var(--mono);font-size:12.5px;line-height:1.9;color:var(--ink);overflow-x:auto;white-space:pre}
+.cmd code .c{color:var(--ink3)}
+.get-side{min-width:0}
+.get-side .qr-card{border:1px solid var(--line);border-radius:20px;overflow:hidden;background:var(--card);box-shadow:0 24px 70px rgba(19,19,20,.10)}
+.get-side .qr-card img{width:100%}
+.get-side p{color:var(--ink2);font-size:14.5px;margin-top:20px;max-width:38ch}
+.get-side p a{color:var(--ink);border-bottom:1px solid var(--line2)}
+@media(max-width:900px){.get .grid{grid-template-columns:minmax(0,1fr)}}
+
+/* ---------- footer ---------- */
+footer{position:relative;overflow:hidden;border-top:1px solid var(--line);padding:52px 0 0}
+footer .wrap{max-width:none}
+footer .fl{display:flex;gap:30px;flex-wrap:wrap;justify-content:center}
+footer a.fl-link{font-family:var(--mono);font-size:11px;letter-spacing:.1em;color:var(--ink3);text-transform:uppercase;transition:color .2s;position:relative;padding-bottom:3px}
+footer a.fl-link::after{content:"";position:absolute;left:0;bottom:0;width:100%;height:1px;background:var(--ink);transform:scaleX(0);transform-origin:right;transition:transform .3s var(--ease)}
+footer a.fl-link:hover::after{transform:scaleX(1);transform-origin:left}
+footer a.fl-link:hover{color:var(--ink)}
+footer .fine{font-size:12px;color:var(--ink3);width:100%;margin-top:8px;text-align:center}
+.footword{display:block;font-family:var(--disp);font-weight:600;font-size:24vw;line-height:.78;text-align:center;color:rgba(19,19,20,.055);letter-spacing:-.03em;transform:translateY(30%);user-select:none;pointer-events:none;white-space:nowrap;margin-top:44px}
+
+.get-side p a{transition:color .2s,border-color .2s}
+.get-side p a:hover{color:var(--accent);border-color:var(--accent)}
+
+/* ---------- reveal ---------- */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .8s var(--ease),transform .8s var(--ease)}
+.reveal.in{opacity:1;transform:none}
+.reveal-stagger>*{opacity:0;transform:translateY(20px);transition:opacity .7s var(--ease),transform .7s var(--ease)}
+.reveal-stagger.in>*{opacity:1;transform:none}
+.reveal-stagger.in>*:nth-child(2){transition-delay:.08s}
+.reveal-stagger.in>*:nth-child(3){transition-delay:.16s}
+.reveal-stagger.in>*:nth-child(4){transition-delay:.24s}
+.reveal-stagger.in>*:nth-child(5){transition-delay:.32s}
+.reveal-stagger.in>*:nth-child(6){transition-delay:.4s}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal,.reveal-stagger>*{opacity:1!important;transform:none!important}h1 .l span{transform:none}.hero-word{opacity:1!important}.hero-flicker,.blob{display:none}.pm{opacity:1!important}.buddy{animation:none!important}}
 </style>
 </head>
 <body>
 
-<nav><div class="wrap nav-in">
-  <a class="brand" href="#">
-    <svg width="21" height="21" viewBox="0 0 40 40"><path d="M8 26c-3.3 0-6-2.7-6-6 0-3 2.2-5.5 5.1-5.9C7.9 9 12 5 17 5c4.2 0 7.8 2.7 9.2 6.4.4-.1.9-.1 1.3-.1 4.4 0 8 3.6 8 8s-3.6 8-8 8H8z" fill="#14120F"/><rect x="12.5" y="14.5" width="4" height="7" rx="2" fill="#F7F5F0"/><rect x="23.5" y="14.5" width="4" height="7" rx="2" fill="#F7F5F0"/></svg>
-    Remote
-  </a>
-  <div class="nav-links">
-    <a href="#product">The thread</a>
-    <a href="#modes">Cowork &amp; Code</a>
-    <a href="#lid">From anywhere</a>
-    <a href="https://github.com/GC-WORK11/remote">Source</a>
-  </div>
-  <a class="nav-cta" href="#install">Get the daemon</a>
-</div></nav>
 
-<!-- ══ HERO — centered editorial over the living meadow ══ -->
-<header class="hero">
-  <canvas id="aether" aria-hidden="true"></canvas>
-  <div class="hero-in">
-    <div class="hero-mark">
-      <svg width="20" height="20" viewBox="0 0 40 40"><path d="M20 4c8 0 14.5 6 14.9 13.8 2.9.7 5.1 3.3 5.1 6.4 0 3.6-3 6.5-6.7 6.5H11.5C6.6 30.7 3 27 3 22.4c0-3.4 2.1-6.3 5-7.5C9.3 8.9 14 4 20 4z" fill="#FF5FB0"/><rect x="15" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 16.7 18.5)"/><rect x="22.5" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 24.2 18.5)"/></svg>
-      remote
-    </div>
-    <h1>Your laptop is the computer.<br>Your phone is <em>the remote</em>.</h1>
-    <p class="lede">A small daemon turns the machine on your desk into a rig. Pair once — then agents do real work on it: files, apps, terminals, browsers, code. Lid closed. You on the couch.</p>
-    <div class="cta">
-      <a class="btn primary" href="#install">Install the daemon</a>
-      <a class="btn ghost" href="https://github.com/GC-WORK11/remote">Star on GitHub</a>
-    </div>
-    <div class="trust">open source · local-first · tailnet-bound · no cloud account</div>
+
+<header class="hero" id="top">
+  <div class="hero-art">
+    <img class="art" src="assets/philosophers-hero.jpg" alt="Oil painting — philosophers gathered around a laptop, the Remote mascots among them" fetchpriority="high">
+    <img class="art pm p1" src="assets/philosophers-hero.jpg" alt="" aria-hidden="true">
+    <img class="art pm p2" src="assets/philosophers-hero.jpg" alt="" aria-hidden="true">
+    <img class="art pm p3" src="assets/philosophers-hero.jpg" alt="" aria-hidden="true">
+      <div class="hero-flicker"></div>
+    <div class="hero-word">remote</div>
+    <img class="blob b1" src="assets/mascots-3d/mascot-indigo-jump.png" alt="" aria-hidden="true">
+    <img class="blob b2" src="assets/mascots-3d/mascot-rose-hero.png" alt="" aria-hidden="true">
+    <img class="blob b3" src="assets/mascots-3d/mascot-rose-jump.png" alt="" aria-hidden="true">
   </div>
-  <div class="field"><canvas id="meadow" aria-hidden="true"></canvas></div>
-  <div class="scroll-hint">scroll — the meadow is alive</div>
 </header>
 
-<!-- ══ PRODUCT MOMENT — the real thread, annotated ══ -->
-<section id="product" class="moment"><div class="wrap">
-  <div class="moment-head reveal">
-    <div class="kicker">the thread</div>
-    <h2>Work product,<br>not log output.</h2>
-    <p class="lede">Turns land as prose, screenshots and diffs — tool calls fold into a single quiet line. This is a real thread from the app, unedited.</p>
-  </div>
-  <div class="stage reveal" style="transition-delay:.1s">
-    <div class="chips">
-      <div class="chip chip-l" style="top:14%;animation-delay:-1s">
-        <svg class="mini" viewBox="0 0 40 40"><path d="M20 4c8 0 14.5 6 14.9 13.8 2.9.7 5.1 3.3 5.1 6.4 0 3.6-3 6.5-6.7 6.5H11.5C6.6 30.7 3 27 3 22.4c0-3.4 2.1-6.3 5-7.5C9.3 8.9 14 4 20 4z" fill="#F5A623"/><rect x="15" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 16.7 18.5)"/><rect x="22.5" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 24.2 18.5)"/></svg>
-        <div>Observed<small>the agent watched the real screen</small></div>
-      </div>
-      <div class="chip chip-r" style="top:30%;animation-delay:-3s">
-        <span class="dot-ok"></span>
-        <div>Screenshot card<small>the desktop, delivered in-thread</small></div>
-      </div>
-      <div class="chip chip-l" style="top:56%;animation-delay:-2s">
-        <svg class="mini" viewBox="0 0 40 40"><rect x="6" y="6" width="28" height="28" rx="14" fill="#9B7BFF"/><rect x="15" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 16.7 18.5)"/><rect x="22.5" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 24.2 18.5)"/></svg>
-        <div>One voice per turn<small>narration merges — zero trace rows</small></div>
-      </div>
-      <div class="chip chip-r" style="top:72%;animation-delay:-4.5s">
-        <svg class="mini" viewBox="0 0 40 40"><rect x="6" y="6" width="28" height="28" rx="8" fill="#14120F"/><rect x="15" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 16.7 18.5)"/><rect x="22.5" y="15.5" width="3.4" height="6" rx="1.7" fill="#fff" transform="rotate(-10 24.2 18.5)"/></svg>
-        <div>Model picker<small>your subs — Anthropic, OpenAI, local</small></div>
-      </div>
-    </div>
-    <div class="phone">
-      <div class="notch"></div>
-      <img src="assets/thread.png" alt="A real Remote thread — the agent observed the desktop, took a screenshot, typed into TextEdit, and reported done">
-    </div>
-  </div>
-</div></section>
-
-<!-- ══ STRIP — the app, uncut ══ -->
-<section class="strip" aria-label="Screens from the app">
-  <div class="strip-rail">
-    <img src="assets/inbox.png" alt="Inbox — live sessions with blob mascots">
-    <img src="assets/thread.png" alt="Thread — agent replies as prose">
-    <img src="assets/browser.png" alt="In-app browser on an agent-built site">
-    <img src="assets/terminal.png" alt="Real pty terminal">
-    <img src="assets/workspaces.png" alt="Workspaces — project inbox">
-    <img src="assets/working.png" alt="Working row — live turn">
-    <img src="assets/inbox.png" alt="" aria-hidden="true">
-    <img src="assets/thread.png" alt="" aria-hidden="true">
-    <img src="assets/browser.png" alt="" aria-hidden="true">
-    <img src="assets/terminal.png" alt="" aria-hidden="true">
-    <img src="assets/workspaces.png" alt="" aria-hidden="true">
-    <img src="assets/working.png" alt="" aria-hidden="true">
+<section class="fan" id="screens">
+  <div class="wrap2">
+    <img class="buddy" src="assets/mascots-3d/mascot-indigo-idle.png" style="width:58px;left:6%;top:8%;--r:-8deg" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-rose-jump.png" style="width:44px;right:8%;top:14%;--r:10deg;animation-delay:-3s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-gold-peek.png" style="width:36px;left:14%;bottom:12%;--r:6deg;animation-delay:-5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-plum-idle.png" style="width:52px;right:14%;bottom:8%;--r:-6deg;animation-delay:-1.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-rose-sleepy.png" style="width:28px;left:44%;top:4%;--r:4deg;animation-delay:-7s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-lavender-jump.png" style="width:34px;left:30%;bottom:6%;--r:12deg;animation-delay:-2.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-gold-idle.png" style="width:30px;right:36%;top:7%;--r:-14deg;animation-delay:-6s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-rose-idle.png" style="width:66px;right:4%;top:52%;--r:9deg;animation-delay:-4.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-indigo-jump.png" style="width:40px;left:4%;bottom:30%;--r:-11deg;animation-delay:-8s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-plum-peek.png" style="width:26px;right:22%;bottom:3%;--r:5deg;animation-delay:-3.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-lavender-sleepy.png" style="width:26px;left:52%;bottom:9%;--r:8deg;animation-delay:-6.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-gold-jump.png" style="width:30px;right:30%;top:20%;--r:-9deg;animation-delay:-2s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-rose-jump.png" style="width:24px;left:22%;top:26%;--r:12deg;animation-delay:-7.5s" alt="" aria-hidden="true">
+    <img class="buddy" src="assets/mascots-3d/mascot-indigo-peek.png" style="width:36px;left:46%;bottom:1%;--r:-4deg;animation-delay:-1s" alt="" aria-hidden="true">
+    <div class="shot f1"><div class="bezel"><div class="screen"><div class="island"></div><img src="assets/onboard.png" alt="Remote welcome screen" loading="lazy"></div></div></div>
+    <div class="shot f2"><div class="bezel"><div class="screen"><div class="island"></div><img src="assets/thread.png" alt="Remote thread — a reply landing" loading="lazy"></div></div></div>
+    <div class="shot f3"><div class="bezel"><div class="screen"><div class="island"></div><img src="assets/inbox.png" alt="Remote inbox — jobs with status" loading="lazy"></div></div></div>
   </div>
 </section>
 
-<!-- ══ MODES ══ -->
-<section id="modes" class="modes-sec"><div class="wrap">
-  <div class="reveal" style="text-align:center">
-    <div class="kicker">two modes</div>
-    <h2>Cowork for the machine.<br>Code for the work.</h2>
-    <p class="lede" style="margin:22px auto 0">One rig, two postures. Cowork reaches into the desktop — windows, clipboard, files, browsers. Code roots an agent in a project with diffs, checkpoints, terminals and previews.</p>
+<section class="see" id="demo"><div class="wrap">
+  <div class="sec-head center reveal">
+    <div class="mono">SEE IT WORK</div>
+    <h2>The real app,<br><em>doing real work.</em></h2>
   </div>
-  <div class="modes">
-    <div class="mode dark reveal">
-      <div class="tag">cowork</div>
-      <h3>The desktop is the interface</h3>
-      <p>Agents see your screen, drive real apps, arrange real files, fetch real pages — then hand the artifact back into the thread. Watch it happen through Observed cards.</p>
-      <div class="shot"><img src="assets/inbox.png" alt="Remote inbox — live sessions with blob mascots"></div>
+  <img class="mgroup reveal" src="assets/mascots-3d/mascots-group.png" alt="The Remote mascots — indigo, rose, gold, lavender and plum">
+  <div class="grid">
+    <div class="see-copy reveal">
+      <h3>Text it like a friend. It does the work on your computer.</h3>
+      <p>Your message goes in a bubble. The answer comes back in plain words, with a small &ldquo;Done&rdquo; when it finishes.</p>
+      <ul>
+        <li>Replies stream like a chat, not a log dump</li>
+        <li>Pick the model and how hard it thinks, above the keyboard</li>
+        <li>Swipe to quote, long-press to retry or branch a turn</li>
+      </ul>
     </div>
-    <div class="mode light reveal" style="transition-delay:.1s">
-      <div class="tag">code</div>
-      <h3>Real projects, real diffs</h3>
-      <p>Open a repo, prompt, get a committed change. Files, a true pty terminal, in-app browser previews, per-turn git checkpoints you can preview and restore.</p>
-      <div class="shot"><img src="assets/browser.png" alt="In-app browser previewing an agent-built site"></div>
+    <figure class="demo reveal" style="margin:0">
+      <div class="bezel"><div class="screen">
+        <video src="assets/demo-thread.mp4" autoplay muted loop playsinline preload="metadata"></video>
+      </div></div>
+      <img class="buddy" src="assets/mascots-3d/mascot-rose-idle.png" style="width:44px;right:-34px;top:6%;--r:8deg" alt="" aria-hidden="true">
+      <img class="buddy" src="assets/mascots-3d/mascot-indigo-sleepy.png" style="width:38px;left:-30px;bottom:9%;--r:-7deg;animation-delay:-4s" alt="" aria-hidden="true">
+      <figcaption class="mono">RECORDED ON A REAL LAPTOP</figcaption>
+    </figure>
+  </div>
+</div></section>
+
+<section class="how" id="how"><div class="wrap">
+  <div class="sec-head center reveal">
+    <div class="mono">HOW IT WORKS</div>
+    <h2>Sixty seconds<br>to <em>connected.</em></h2>
+    <p>One installer on the laptop, one app on the phone, one QR code between them.</p>
+  </div>
+  <div class="steps reveal-stagger">
+    <div class="step">
+      <span class="sn">01 — INSTALL</span>
+      <h4>Run the installer</h4>
+      <p>One command installs everything — the program, the agent, and the settings that keep it awake with the lid shut.</p>
+      <div class="visual"><code><b>$</b> curl -fsSL github.com/…/Remote-Setup.run -o /tmp/r.run
+<b>$</b> sh /tmp/r.run
+<span class="c"># installs · starts · prints a QR</span></code></div>
+    </div>
+    <div class="step">
+      <span class="sn">02 — PAIR</span>
+      <h4>Scan the QR</h4>
+      <p>The installer prints a QR code. The app scans it — that&rsquo;s the whole login. No passwords, no accounts.</p>
+      <div class="visual"><img src="assets/terminal-pair.png" alt="The installer prints a real QR and pairing code in the terminal"></div>
+    </div>
+    <div class="step">
+      <span class="sn">03 — CLOSE THE LID</span>
+      <h4>Work from anywhere</h4>
+      <p>Your laptop stays awake with the lid shut. Same Wi-Fi on the couch, Tailscale from anywhere else.</p>
+      <div class="visual"><img src="assets/inbox.png" style="object-position:50% 28%" alt="The inbox on the phone — every job with a status word"></div>
     </div>
   </div>
 </div></section>
 
-<!-- ══ MOAT ══ -->
-<section id="lid" class="moat-sec"><div class="wrap">
-  <div class="moat reveal">
-    <div class="moat-in">
-      <div class="moat-copy">
-        <div class="kicker">the moat</div>
-        <h2>Close the lid.<br>Keep working.</h2>
-        <p>Keep-awake is a real OS service — the daemon holds idle/display assertions, so the rig answers on the tailnet with the lid shut and the laptop in your bag.</p>
-        <p>Paired over Tailscale, it doesn't matter what network either device is on. Airport Wi-Fi, a phone hotspot, a friend's couch — the wire survives.</p>
-      </div>
-      <div class="term" aria-hidden="true">
-<span class="c">$</span> ./Remote-Setup.run
-<span class="c">[sudo] password for devin: ••••••••</span>
-<span class="g">✓</span> omprd → /usr/local/bin
-<span class="g">✓</span> keep-awake → systemd --user
-<span class="g">✓</span> bound to tailnet 100.x.x.x:8790
-
-  <span class="r">pair code</span>  424242   <span class="c">(60s)</span>
-<span class="qr">  ▄▄▄▄▄▄▄ ▄ ▄ ▄ ▄▄ ▄▄▄▄▄▄▄
-  █ ▄▄▄ █ ▀█▀ ▄▀█ █ ▄▄▄ █
-  █ ███ █ ██ ▄ ██▄ █ ███ █
-  █▄▄▄▄▄█ ▄ █ ▀▄▀█ █▄▄▄▄▄█
-  ▄▄▄▄ ▄▄ ▀▀ █ ▄  ▄▄▄ ▄ ▄
-  █ ▀ ▀▄▄▄█▄▄█▀█▄▀██ ▄▀▄▄
-  ▄▄▄▄▄▄▄ █▄▄▀ █ █ ▄ █▀▄▀
-  █ ▄▄▄ █ ▀ ▄█▄▀▄█▀▀▄▀▀█
-  █▄▄▄▄▄█ █ ▄▄▄▄ ▀▄█▄▄▄▀</span>
-  <span class="g">scan with the app → you're in</span>
-      </div>
+<section class="features" id="features"><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="mono">WHAT&rsquo;S IN YOUR POCKET</div>
+    <h2>The whole computer,<br><em>pocket-sized.</em></h2>
+  </div>
+  <div class="cells reveal-stagger">
+    <div class="cell">
+      <div class="thumb"><img src="assets/thread.png" alt="A thread on the phone — questions in bubbles, answers in plain words"></div>
+      <h4>Chat, not a terminal</h4>
+      <p>Ask for what you want in a text message. Get back files, changes, and answers.</p>
+    </div>
+    <div class="cell">
+      <div class="thumb"><img src="assets/inbox.png" style="object-position:50% 38%" alt="The inbox — every job gets a mascot and a status word"></div>
+      <h4>Every job in one inbox</h4>
+      <p>Each session shows up like a contact — a face and a status word: Working, Done, Needs&nbsp;you.</p>
+    </div>
+    <div class="cell">
+      <div class="thumb"><img src="assets/computer.png" style="object-position:50% 30%" alt="Live screen mirror — watch the laptop work, take over with a tap"></div>
+      <h4>Watch your machine's screen live</h4>
+      <p>See the real display stream in. Tap to take over — click, type, scroll.</p>
+    </div>
+    <div class="cell">
+      <div class="thumb"><img src="assets/code-folders.png" style="object-position:50% 6%" alt="A real terminal on the phone — connected to the laptop"></div>
+      <h4>Code mode</h4>
+      <p>Open folders, run terminals, read files — the whole repo in your pocket.</p>
+    </div>
+    <div class="cell">
+      <div class="thumb"><img src="assets/drawer.png" alt="Code mode's browser pane — the laptop browses for you"></div>
+      <h4>Bring your own subscription</h4>
+      <p>Claude, Codex, whatever you already pay for — it signs in on the laptop. Your phone never sees a key.</p>
+    </div>
+    <div class="cell">
+      <div class="thumb"><img src="assets/onboard.png" style="object-position:50% 22%" alt="A job mid-turn — the inbox says Working"></div>
+      <h4>Close the lid, keep working</h4>
+      <p>The laptop stays awake with the lid shut — on your Wi-Fi, or from anywhere over Tailscale.</p>
     </div>
   </div>
 </div></section>
 
-<!-- ══ INSTALL ══ -->
-<section id="install" class="install"><div class="wrap">
-  <div class="reveal">
-    <div class="kicker">one command</div>
-    <h2>Put the rig<br>on the metal.</h2>
+<section class="nums" id="numbers"><div class="wrap">
+  <div class="sec-head reveal" style="margin-bottom:52px">
+    <div class="mono">MEASURED, NOT MARKETED</div>
+    <h2>Honest <em>numbers.</em></h2>
+    <p>Everything below is a real measurement on a real machine. Nothing estimated, nothing rounded up.</p>
   </div>
-  <div class="cmdline reveal">
-    <span><span class="p">$</span> git clone https://github.com/GC-WORK11/remote.git && cd remote && sh os-bridge/linux/install.sh</span>
-    <button onclick="navigator.clipboard.writeText('git clone https://github.com/GC-WORK11/remote.git && cd remote && sh os-bridge/linux/install.sh');this.textContent='copied'" type="button">copy</button>
+  <div class="nums-grid reveal-stagger">
+    <div class="num"><div class="v">0.23<i>ms</i></div><div class="k">a tap answers — measured round trip on the machine</div></div>
+    <div class="num"><div class="v">0.17<i>ms</i></div><div class="k">a key lands — every keystroke, round trip</div></div>
+    <div class="num"><div class="v">10.2<i>ms</i></div><div class="k">a fresh frame of your screen arrives</div></div>
+    <div class="num"><div class="v">29<i>MB</i></div><div class="k">memory sitting idle — 51 MB while it works</div></div>
   </div>
-  <div class="note reveal">Linux desktops: <code>Remote-Setup.run</code> in <code>os-bridge/installer</code> — double-click, approve the admin prompt, scan the QR it opens. macOS &amp; Windows builds in the repo — Android &amp; iOS app too.</div>
+  <a class="bench-link reveal" href="https://github.com/GC-WORK11/remote/blob/main/docs/BENCHMARKS.md">READ THE RAW BENCHMARKS →</a>
+</div></section>
+
+<section class="get" id="get"><div class="wrap">
+  <div class="sec-head reveal">
+    <div class="mono">GET IT</div>
+    <h2>Your laptop is already<br>powerful enough.<br><em>Point a phone at it.</em></h2>
+  </div>
+  <div class="grid">
+    <div class="cmds reveal">
+      <div class="cmd"><span class="n">01 · ON THE LAPTOP (LINUX)</span><code>curl -fsSL https://github.com/GC-WORK11/remote/releases/latest/download/Remote-Setup.run -o /tmp/remote.run
+sh /tmp/remote.run
+<span class="c"># installs, starts, prints a QR — done</span></code></div>
+      <div class="cmd"><span class="n">02 · ON THE PHONE (ANDROID)</span><code>Get the APK — remote-1.0.0.apk
+<a href="https://github.com/GC-WORK11/remote/releases/latest/download/remote-1.0.0.apk" style="color:var(--accent)">github.com/GC-WORK11/remote · releases</a>
+<span class="c"># iOS coming · then scan the laptop's QR</span></code></div>
+      <div class="cmd"><span class="n">03 · SIGN IN ONCE</span><code>omp auth login
+<span class="c"># your subscriptions live on the laptop</span></code></div>
+    </div>
+    <div class="get-side reveal">
+      <div class="qr-card"><img src="assets/terminal-pair.png" alt="Terminal QR pairing — scan with the app, enter the 6-digit code"></div>
+      <p>Free and open source under MIT. It's unaudited — <a href="https://github.com/GC-WORK11/remote/blob/main/docs/AUTH.md">read the security model</a> before you expose anything.</p>
+    </div>
+  </div>
 </div></section>
 
 <footer><div class="wrap">
-  <div class="foot">
-    <div class="l"><b style="color:var(--ink)">Remote</b> — your laptop is the computer, your phone is the remote.</div>
-    <div class="r">open source · MIT · made for the couch</div>
+  <div class="fl">
+    <a class="fl-link" href="https://github.com/GC-WORK11/remote">GitHub</a>
+    <a class="fl-link" href="https://github.com/GC-WORK11/remote#setup">Connect</a>
+    <a class="fl-link" href="https://github.com/GC-WORK11/remote/blob/main/docs/BENCHMARKS.md">Benchmarks</a>
+    <a class="fl-link" href="#demo">Demo</a>
+    <a class="fl-link" href="https://github.com/GC-WORK11/remote/blob/main/LICENSE">MIT</a>
   </div>
-</div></footer>
+  <div class="fine">Remote is a personal remote for your own computers — nothing runs in our cloud. Linux and Android today; iOS, macOS and Windows on the roadmap.</div>
+</div>
+<div class="footword" aria-hidden="true">remote</div>
+</footer>
 
 <script>
-/* ── ascii aether — a faint field of glyphs drifting behind the hero.
-   Characters bloom toward the pointer and dim back into the paper —
-   text stays untouched: the layer sits below the meadow band and only
-   ever renders at ≤14% ink. ── */
-(() => {
-  const cv = document.getElementById('aether'), ctx = cv.getContext('2d');
-  const GLYPHS = ['·', '˙', '∴', '∵', '˚', '·', '°', '⋅'];
-  const STEP = 46;                  // css px grid pitch
-  let W, H, cols, rows, pts = [], mx = -9999, my = -9999;
-  const rnd = (a => () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; })(7);
+// scroll reveals
+const io=new IntersectionObserver(es=>es.forEach(e=>{if(e.isIntersecting){e.target.classList.add('in');io.unobserve(e.target)}}),{threshold:.12});
+document.querySelectorAll('.reveal,.reveal-stagger').forEach(el=>io.observe(el));
 
-  function build() {
-    const r = cv.getBoundingClientRect();
-    W = r.width; H = r.height;
-    cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
-    ctx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
-    ctx.font = '12px ui-monospace, Menlo, monospace';
-    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-    cols = Math.ceil(W / STEP); rows = Math.ceil(H / STEP); pts = [];
-    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
-      if (rnd() < 0.44) continue;   // sparse — mostly empty paper
-      pts.push({ x: x * STEP + STEP / 2, y: y * STEP + STEP / 2,
-        g: GLYPHS[(rnd() * GLYPHS.length) | 0], ph: rnd() * Math.PI * 2, e: 0 });
-    }
-  }
-  cv.parentElement.addEventListener('pointermove', e => {
-    const r = cv.getBoundingClientRect(); mx = e.clientX - r.left; my = e.clientY - r.top;
-  });
-  cv.parentElement.addEventListener('pointerleave', () => { mx = my = -9999; });
-  addEventListener('resize', build); build();
+const reduced=matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  function draw(now) {
-    const t = now / 1000;
-    ctx.clearRect(0, 0, W, H);
-    for (const p of pts) {
-      const dx = p.x - mx, dy = p.y - my, d2 = dx * dx + dy * dy;
-      const target = d2 < 40000 ? 1 - Math.sqrt(d2) / 200 : 0;
-      p.e += (target - p.e) * 0.08;                    // ease toward bloom
-      const breathe = 0.5 + 0.5 * Math.sin(t * 0.55 + p.ph);
-      const a = 0.05 + breathe * 0.045 + p.e * 0.32;   // never stronger than ink-14%
-      if (a < 0.015) continue;
-      ctx.fillStyle = `rgba(20,18,15,${a.toFixed(3)})`;
-      ctx.fillText(p.g, p.x + Math.sin(t * 0.3 + p.ph) * 6, p.y - Math.sin(t * 0.22 + p.ph * 1.7) * 9);
-    }
-    requestAnimationFrame(draw);
-  }
-  requestAnimationFrame(draw);
-})();
+// hero exit: painting eases down+out as you leave (FOLD/FORM feel)
+const hero=document.querySelector('.hero'),heroArt=document.querySelector('.hero-art');
+if(hero&&heroArt){
+  // painted-mascot coords in the source image (px of 1536x1024), mapped through object-fit cover
+  const SRC=[[379,368],[880,635],[1398,677]],IW=1536,IH=1024;
+  const pos=()=>{
+    const cw=heroArt.clientWidth,ch=heroArt.clientHeight;
+    const sc=Math.max(cw/IW,ch/IH),ox=(cw-IW*sc)*.5,oy=(ch-IH*sc)*.58;
+    SRC.forEach((s,i)=>{
+      heroArt.style.setProperty('--m'+(i+1)+'x',((s[0]*sc+ox)/cw*100).toFixed(2)+'%');
+      heroArt.style.setProperty('--m'+(i+1)+'y',((s[1]*sc+oy)/ch*100).toFixed(2)+'%');
+    });
+  };
+  pos();addEventListener('resize',pos);
+}
+if(hero&&heroArt&&!reduced){
+  let ht=false;
+  const heroDrive=()=>{
+    const h=hero.offsetHeight,p=Math.min(1,Math.max(0,scrollY/(h*0.85)));
+    const e=1-Math.pow(1-p,3);
+    heroArt.style.transform=`translateY(${e*46}px) scale(${1-e*0.055})`;
+    heroArt.style.opacity=1-e*0.4;
+    ht=false};
+  addEventListener('scroll',()=>{if(!ht){requestAnimationFrame(heroDrive);ht=true}},{passive:true});
+  heroDrive();
+}
 
-/* ── pixel meadow — the app's welcome-screen garden, confined to a low
-   band: stems stay out of the type's way entirely ──
-   Thin sine stems, cross blossoms in rose hues, glow pools breathing,
-   pollen motes drifting, sparse grass on the ground line. A pointer
-   brushes a breeze through the stems. Deterministic layout, live sway. */
-(() => {
-  const cv = document.getElementById('meadow'), ctx = cv.getContext('2d');
-  const CELL = 13;                 // css px per pixel cell
-  const CORE='#C93B6E', PETAL_IN='#EF6FA4', PETAL='#F79FBE', PETAL_HI='#FBC4D9',
-        GLOW='#F9D9E4', CREAM='#EFE6D8', STEM='#5E9C5F', LEAF='#7FBB80',
-        SPARK='#EFB85C', BLADE='#8FAE86';
-  const HUES=[[CORE,PETAL],[PETAL_IN,PETAL_HI],['#E8A83E','#F3CD8B'],[CORE,'#F79FBE'],[PETAL_IN,'#FBC4D9']];
-  let W,H,COLS,ROWS,GROUND;
-  let cells=[], blooms=[], motes=[], grass=[];
-  let mx=-9999,my=-9999;
+// demo video: ambient autoplay loop; click pauses/resumes
+document.querySelectorAll('.demo video').forEach(v=>{
+  v.addEventListener('click',()=>v.paused?v.play():v.pause());
+});
 
-  function mulberry(a){return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
-
-  function build(){
-    const r=cv.getBoundingClientRect();
-    W=r.width;H=r.height;
-    cv.width=W*devicePixelRatio;cv.height=H*devicePixelRatio;
-    ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
-    COLS=Math.ceil(W/CELL);ROWS=Math.ceil(H/CELL);
-    GROUND=ROWS-2;
-    cells=[];blooms=[];motes=[];grass=[];
-    const rnd=mulberry(20261004);
-    const grid=Array.from({length:ROWS},()=>Array(COLS).fill(null));
-    const put=(x,y,c,f,hf)=>{const xi=Math.round(x);if(xi>=0&&xi<COLS&&y>=0&&y<ROWS){grid[y][xi]=c;cells.push({x:xi,y,c,f,hf})}};
-    // flowers — seeded along the width, meadow band lower 45%
-    const n=Math.max(10,Math.floor(COLS/7));
-    for(let i=0;i<n;i++){
-      const x=Math.floor(2+rnd()*(COLS-4));
-      const band=ROWS*0.5;
-      const top=Math.floor(GROUND-3-rnd()*band*0.55);
-      const hue=Math.floor(rnd()*HUES.length);
-      const lean=(rnd()*2-1)*0.9;
-      const big=rnd()>0.62;
-      const ph=rnd()*Math.PI*2;
-      const fi=blooms.length;
-      blooms.push({x,top,hue,lean,big,ph});
-      const [deep,light]=HUES[hue];
-      for(let y=top+1;y<=GROUND;y++){
-        const hf=(y-top)/(GROUND-top);            // 0 tip → 1 base
-        const xs=x+lean*Math.sin((y-top)*0.55);
-        put(xs,y,STEM,fi,hf);
-      }
-      const leafY=Math.round(top+(GROUND-top)*0.62);
-      const leafX=x+lean*Math.sin((leafY-top)*0.5);
-      const hfL=(leafY-top)/(GROUND-top);
-      put(leafX+(lean>=0?-1:1),leafY,LEAF,fi,hfL);
-      put(leafX+(lean>=0?-2:2),leafY,LEAF,fi,hfL);
-      // blossom cross — anchored at the tip (hf≈0)
-      put(x,top,deep,fi,0);
-      put(x-1,top,light,fi,0);put(x+1,top,light,fi,0);
-      put(x,top-1,light,fi,0);put(x,top+1,light,fi,0);
-      if(big){put(x-1,top-1,light,fi,0);put(x+1,top-1,light,fi,0);
-              put(x-1,top+1,deep,fi,0);put(x+1,top+1,deep,fi,0)}
-      // glow pool
-      for(let gy=top-2;gy<=top+2;gy++)for(let gx=x-2;gx<=x+2;gx++){
-        if(gx>=0&&gx<COLS&&gy>=0&&gy<ROWS&&!grid[gy][gx]&&rnd()>0.4)
-          cells.push({x:gx,y:gy,c:GLOW,f:fi,hf:0,glow:true,ph:rnd()*Math.PI*2});
-      }
-    }
-    // grass fringe + soil dots on the ground line
-    for(let x=0;x<COLS;x++){
-      if(rnd()>0.55){const h=1+Math.floor(rnd()*2);
-        for(let d=0;d<h;d++)grass.push({x:x+d*0.45,y:GROUND-1-d,c:d?LEAF:BLADE});}
-      if(rnd()>0.7)cells.push({x,y:GROUND+1,c:CREAM,f:-1,hf:1});
-    }
-    // pollen motes
-    for(let i=0;i<Math.floor(COLS/9);i++)
-      motes.push({x:rnd()*COLS,y:rnd()*ROWS*0.62,r:rnd(),ph:rnd()*Math.PI*2,sp:0.4+rnd()*0.8});
-  }
-
-  const hero=cv.closest('.hero');
-  hero.addEventListener('pointermove',e=>{
-    const r=cv.getBoundingClientRect();mx=e.clientX-r.left;my=e.clientY-r.top;
-  });
-  hero.addEventListener('pointerleave',()=>{mx=my=-9999});
-  addEventListener('resize',build);build();
-
-  const RC=CELL*0.8, R0=CELL*0.1, RAD=CELL*0.2;
-  function rr(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r);ctx.fill()}
-
-  function draw(now){
-    const t=now/1000;
-    ctx.clearRect(0,0,W,H);
-    // stems + blossoms sway — tips move, bases hold; pointer adds breeze
-    for(const c of cells){
-      let dx=0;
-      if(c.f>=0){const b=blooms[c.f];
-        dx=Math.sin(t*0.9+b.ph)*(1-c.hf)*CELL*0.9;
-        const px=c.x*CELL-mx,py=c.y*CELL-my,dd=px*px+py*py;
-        if(dd<26000){const d=Math.sqrt(dd)||1;dx+=px/d*(1-d/161)*CELL*2.4}
-      }
-      ctx.globalAlpha=c.glow?(0.35+0.3*Math.sin(t*1.6+c.ph)):(c.c===CREAM?0.5:0.92);
-      ctx.fillStyle=c.c;
-      rr(c.x*CELL+R0+dx,c.y*CELL+R0,RC,RC,RAD);
-    }
-    ctx.globalAlpha=0.75;
-    for(const g of grass){ctx.fillStyle=g.c;
-      const dx=Math.sin(t*1.2+g.x)*CELL*0.18;
-      rr(g.x*CELL+R0+dx,g.y*CELL+R0,RC,RC,RAD)}
-    // pollen — slow rise + drift, twinkle
-    for(const p of motes){
-      p.y-=p.sp*0.016;if(p.y<-1){p.y=ROWS*0.5;p.x=Math.random()*COLS}
-      const dx=Math.sin(t*0.7+p.ph)*CELL*0.5;
-      ctx.globalAlpha=0.35+0.45*Math.abs(Math.sin(t*1.3+p.ph));
-      ctx.fillStyle=SPARK;
-      rr(p.x*CELL+CELL*0.25+dx,p.y*CELL+CELL*0.25,CELL*0.5,CELL*0.5,CELL*0.25);
-    }
-    ctx.globalAlpha=1;
-    requestAnimationFrame(draw);
-  }
-  requestAnimationFrame(draw);
-})();
-
-/* ── scroll reveals ── */
-const io = new IntersectionObserver(es => es.forEach(e => {
-  if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); }
-}), { threshold: 0.12 });
-document.querySelectorAll('.reveal').forEach(el => io.observe(el));
-
-/* ── gentle parallax on the phone ── */
-(() => {
-  const ph = document.querySelector('.phone');
-  if (!ph) return;
-  addEventListener('scroll', () => {
-    const r = ph.getBoundingClientRect();
-    const p = Math.min(1, Math.max(0, 1 - (r.top + r.height * 0.5) / innerHeight));
-    ph.style.transform = `translateY(${(1 - p) * 30}px)`;
-  }, { passive: true });
-})();
+// angled fan is static — no scroll driver needed
 </script>
 </body>
 </html>
