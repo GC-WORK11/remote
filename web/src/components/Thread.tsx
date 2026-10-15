@@ -3,7 +3,7 @@
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { VList } from "virtua/solid";
 import { app, sessionTitle } from "../lib/store";
-import { rig } from "../lib/rig";
+import { rig, tilde } from "../lib/rig";
 import { engineFor, ChatEngine } from "../lib/chat";
 import { RowView } from "./RowView";
 import { Composer } from "./Composer";
@@ -51,7 +51,7 @@ export function Thread(props: { id: string }) {
     <div class="thread">
       <header class="thread__bar">
         <button
-          class="circle-btn thread__back"
+          class="circle-btn circle-btn--pill thread__back"
           onClick={() => {
             location.hash = "#/home";
           }}
@@ -59,25 +59,42 @@ export function Thread(props: { id: string }) {
         >
           <I.chevL size={17} />
         </button>
-        <div class="thread__title" onClick={() => app.setSessionSheetId(props.id)}>
-          <Buddy k={props.id} size={26} />
-          <span class="thread__name">{session() ? sessionTitle(session()) : "…"}</span>
-          <Show when={meta().model || engine().model()}>
-            <span class="thread__model">{meta().model || engine().model()}</span>
-          </Show>
-        </div>
+        <button class="namepill" onClick={() => app.setSessionSheetId(props.id)}>
+          <Buddy k={props.id} size={22} />
+          <span class="namepill__col">
+            <span class="namepill__title">
+              {session() ? sessionTitle(session()!) : "…"}
+              <Show when={streaming()}>
+                <span class="namepill__dot" />
+              </Show>
+            </span>
+            <span class="namepill__sub">
+              {session() ? tilde(session()!.cwd) || "~/rig" : "~/rig"}
+            </span>
+          </span>
+          <I.chevD size={13} />
+        </button>
         <div class="thread__actions">
           <Show when={meta().hibernated}>
             <span class="pill pill--outline">asleep</span>
           </Show>
-          <button class="circle-btn" title="Screen" onClick={() => app.setScreenPanel(!app.screenPanel())}>
+          <button class="circle-btn circle-btn--pill" title="Screen" onClick={() => app.setScreenPanel(!app.screenPanel())}>
             <I.screen size={16} />
-          </button>
-          <button class="circle-btn" title="Session" onClick={() => app.setSessionSheetId(props.id)}>
-            <I.settings size={16} />
           </button>
         </div>
       </header>
+      <div class="toolstrip">
+        <Show when={session()?.branch || session()?.cwd}>
+          <span class="toolstrip__branch">
+            <I.branch size={11} />
+            {session()?.branch || tilde(session()?.cwd)}
+          </span>
+        </Show>
+        <button class="toolpill" onClick={() => (location.hash = "#/files")}><I.folder size={12} />Files</button>
+        <button class="toolpill" onClick={() => (location.hash = "#/terminal")}><I.terminal size={12} />Terminal</button>
+        <button class="toolpill" onClick={() => (location.hash = "#/browser")}><I.globe size={12} />Browser</button>
+        <button class="toolpill" onClick={() => (location.hash = "#/repos")}><I.book size={12} />Repos</button>
+      </div>
       <div class="thread__scroll" ref={scrollerRef} onScroll={onScroll}>
         <Show when={engine().historyLoading()}>
           <div class="thread__histload">
@@ -85,8 +102,13 @@ export function Thread(props: { id: string }) {
           </div>
         </Show>
         <VList class="thread__list" data={engine().rows}>
-          {(row) => (
-            <RowView row={row} respond={(id, ok) => engine().respondApproval(id, ok)} />
+          {(row, i) => (
+            <RowView
+              row={row}
+              prev={i() > 0 ? engine().rows[i() - 1] : undefined}
+              next={i() < engine().rows.length - 1 ? engine().rows[i() + 1] : undefined}
+              respond={(id, ok) => engine().respondApproval(id, ok)}
+            />
           )}
         </VList>
         <Show when={streaming()}>
@@ -94,13 +116,13 @@ export function Thread(props: { id: string }) {
             when={engine().streamText()}
             fallback={
               <div class="workingrow">
-                <Buddy k={props.id} size={20} />
-                <span class="workingrow__label">
-                  {buddyName(props.id)} is working
+                <span class="minidots">
+                  <i /><i /><i />
                 </span>
-                <span class="workingrow__detail">
-                  {engine().status()}
-                  {engine().workSec() ? ` · ${engine().workSec()}s` : ""}
+                <span class="workingrow__label workingrow__shimmer">
+                  {buddyName(props.id)} is working
+                  <Show when={engine().status()}> · {engine().status()}</Show>
+                  <Show when={engine().workSec()}> · {engine().workSec()}s</Show>
                 </span>
               </div>
             }

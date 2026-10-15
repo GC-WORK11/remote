@@ -8,6 +8,7 @@ import { Thread } from "../components/Thread";
 import { ContextPanel } from "../components/ContextPanel";
 import { Composer } from "../components/Composer";
 import { Buddy } from "../components/Buddy";
+import { Drawer } from "../components/Drawer";
 
 export default function Home() {
   const params = useParams();
@@ -29,9 +30,11 @@ export default function Home() {
       fallback={
         <div class="thread thread--empty">
           <div class="thread__hero">
-            <Buddy k="remote" size={110} />
-            <h2>Your rig, from anywhere</h2>
-            <p class="thread__herosub">Pick a thread — or just say what to do.</p>
+            <span class="inbox__emptytile">
+              <Buddy k="remote" size={84} />
+            </span>
+            <h2>DevBot</h2>
+            <p class="thread__herosub">It works on your real computer.</p>
             <Composer onSent={() => {}} placeholder="Ask anything — the rig does the work" />
           </div>
         </div>
@@ -42,7 +45,8 @@ export default function Home() {
   );
 
   return (
-    <div class={`shell ${app.drawerOpen() ? "shell--drawer" : ""}`}>
+    <div class="shell">
+      <Drawer />
       <Show when={wide() || !params.id}>
         <aside class="rail">
           <Inbox onOpen={(id) => nav(`/thread/${id}`)} />

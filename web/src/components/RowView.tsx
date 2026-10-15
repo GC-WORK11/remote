@@ -178,26 +178,25 @@ function ApprovalCard(props: { row: Row; respond: (id: string, ok: boolean) => v
 }
 
 function CheckRow(props: { row: Row }) {
-  const [open, setOpen] = createSignal(true);
+  const [open, setOpen] = createSignal(!!props.row.streaming);
   const items = () => props.row.items || [];
-  const summary = () => {
-    const n = items().length;
-    const failed = items().filter((i) => i.failed).length;
-    const total = items().reduce((a, i) => a + (i.ms || 0), 0);
-    if (props.row.streaming) return `Working · ${n} action${n === 1 ? "" : "s"}`;
-    return `${failed ? `${failed} failed · ` : ""}Done · ${n} action${n === 1 ? "" : "s"}${total ? ` · ${fmtMs(total)}` : ""}`;
-  };
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+    <div class="row-in row-agent row-gap--sm">
       <div class={`checkcard ${props.row.streaming ? "checkcard--live" : ""}`}>
         <button class="checkcard__head" onClick={() => setOpen(!open())}>
-          <Show when={props.row.streaming} fallback={<I.check size={14} />}>
+          <Show when={props.row.streaming} fallback={<span class="minicheck"><I.check size={9} /></span>}>
             <span class="mini-dots"><i /><i /><i /></span>
           </Show>
-          <span class="checkcard__summary">{summary()}</span>
-          <span class={`checkcard__chev ${open() ? "checkcard__chev--open" : ""}`}>
-            <I.chevD size={13} />
-          </span>
+          <Show when={props.row.streaming} fallback={<span class="checkcard__doneword">Done</span>}>
+            <span class="workingrow__shimmer">Working</span>
+          </Show>
+          <span style={{ flex: 1 }} />
+          <span class="checkcard__count">{items().length} action{items().length === 1 ? "" : "s"}</span>
+          <Show when={!props.row.streaming}>
+            <span class={`checkcard__chev ${open() ? "checkcard__chev--open" : ""}`}>
+              <I.chevD size={12} />
+            </span>
+          </Show>
         </button>
         <Show when={open()}>
           <ul class="checkcard__list">
@@ -231,8 +230,23 @@ function ImageStrip(props: { images: string[] }) {
   );
 }
 
-export function RowView(props: { row: Row; respond: (id: string, ok: boolean) => void }) {
+const side = (r?: Row) => (!r ? "" : r.kind === "sep" ? "sep" : r.kind === "user" ? "user" : "agent");
+
+export function RowView(props: {
+  row: Row;
+  prev?: Row;
+  next?: Row;
+  respond: (id: string, ok: boolean) => void;
+}) {
   const r = () => props.row;
+  // run grouping: 4px inside a sender run, 16px across senders
+  const gapCls = () => {
+    const p = side(props.prev);
+    const s = side(r());
+    if (!p || p === "sep") return "row-gap--lg";
+    return p === s ? "row-gap--sm" : "row-gap--lg";
+  };
+  const tail = () => side(props.next) !== side(r()) || props.next?.kind === "sep";
   return (
     <>
       <Show when={r().kind === "sep"}>
@@ -241,8 +255,8 @@ export function RowView(props: { row: Row; respond: (id: string, ok: boolean) =>
         </div>
       </Show>
       <Show when={r().kind === "user"}>
-        <div class="row-in row-user">
-          <div class="bubble bubble--user">
+        <div class={`row-in row-user ${gapCls()}`}>
+          <div class={`bubble bubble--user ${tail() ? "bubble--tail" : ""}`}>
             <Show when={r().images?.length}>
               <ImageStrip images={r().images!} />
             </Show>
@@ -251,8 +265,8 @@ export function RowView(props: { row: Row; respond: (id: string, ok: boolean) =>
         </div>
       </Show>
       <Show when={r().kind === "agent"}>
-        <div class="row-in row-agent">
-          <div class="bubble bubble--agent">
+        <div class={`row-in row-agent ${gapCls()}`}>
+          <div class={`bubble bubble--agent ${tail() ? "bubble--tail" : ""}`}>
             <Markdown text={r().text || ""} />
           </div>
         </div>

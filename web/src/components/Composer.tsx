@@ -240,8 +240,8 @@ export function Composer(props: {
         </div>
       </Show>
       <div class="composer__box">
-        <button class="circle-btn" title="Attach" onClick={() => imgInput?.click()}>
-          <I.attach size={17} />
+        <button class="composer__iconbtn" title="Attach" onClick={() => fileInput?.click()}>
+          <I.plus size={18} />
         </button>
         <input
           ref={fileInput}
@@ -249,7 +249,8 @@ export function Composer(props: {
           hidden
           multiple
           onChange={(e) => {
-            for (const f of Array.from(e.currentTarget.files || [])) addTextFile(f);
+            for (const f of Array.from(e.currentTarget.files || []))
+              f.type.startsWith("image/") ? addImageFile(f) : addTextFile(f);
             e.currentTarget.value = "";
           }}
         />
@@ -278,25 +279,20 @@ export function Composer(props: {
           onKeyDown={onKey}
           onPaste={onPaste}
         />
-        <button class="circle-btn" title="Attach a file" onClick={() => fileInput?.click()}>
-          <I.file size={16} />
-        </button>
         <button
-          class={`circle-btn ${listening() ? "circle-btn--live" : ""}`}
-          title="Dictate"
-          onClick={toggleMic}
+          class={`sendslot ${streaming() ? "sendslot--stop" : ""} ${listening() ? "sendslot--live" : ""}`}
+          title={streaming() ? "Stop" : input().trim() || attachments().length ? "Send" : "Dictate"}
+          onClick={() => (streaming() ? stop() : input().trim() || attachments().length ? doSend() : toggleMic())}
         >
-          <I.mic size={16} />
-        </button>
-        <button
-          class={`circle-btn composer__send ${streaming() ? "composer__send--stop" : ""}`}
-          title={streaming() ? "Stop" : "Send"}
-          onClick={() => (streaming() ? stop() : doSend())}
-          disabled={!streaming() && !input().trim() && !attachments().length}
-        >
-          <Show when={streaming()} fallback={<I.arrowUp size={17} />}>
-            <I.stop size={13} />
-          </Show>
+          <span class="sendslot__morph">
+            <Show when={streaming()} fallback={
+              <Show when={input().trim() || attachments().length} fallback={<I.mic size={14} />}>
+                <I.arrowUp size={16} />
+              </Show>
+            }>
+              <I.stop size={10} />
+            </Show>
+          </span>
         </button>
       </div>
       <div class="composer__chips">

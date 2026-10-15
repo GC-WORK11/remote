@@ -1,17 +1,24 @@
-// Inbox rail — rig header, search, session list (pinned first), footer tools.
-import { For, Show, createMemo } from "solid-js";
+// Inbox — rig avatar, search toggle, session list. Mirrors the mobile
+// home screen: 38px header circles, 44px buddy rows, hidden footer.
+import { For, Show, createMemo, createSignal } from "solid-js";
 import { app, sessionTitle, sessionPreview, Sess } from "../lib/store";
 import { rig, tilde } from "../lib/rig";
 import I from "./Icon";
-import { Buddy, buddyName } from "./Buddy";
+import { Buddy } from "./Buddy";
 
-function ago(ts?: number): string {
+function clockTime(ts?: number): string {
   if (!ts) return "";
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "now";
-  if (s < 3600) return `${Math.floor(s / 60)}m`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h`;
-  return `${Math.floor(s / 86400)}d`;
+  const d = new Date(ts);
+  const now = new Date();
+  const sameDay = d.toDateString() === now.toDateString();
+  const hm = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (sameDay) return hm;
+  const yest = new Date(now);
+  yest.setDate(now.getDate() - 1);
+  if (d.toDateString() === yest.toDateString()) return "Yesterday";
+  const days = (now.getTime() - d.getTime()) / 86400000;
+  if (days < 6) return d.toLocaleDateString([], { weekday: "short" });
+  return d.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function Row(props: { s: Sess; onOpen: (id: string) => void }) {
@@ -25,6 +32,14 @@ function Row(props: { s: Sess; onOpen: (id: string) => void }) {
     if (m().stalled) return "attention";
     return "idle";
   };
+  const unread = () => !!(m() as any).unread;
+  const cwdLabel = () => {
+    const c = s().cwd || "";
+    if (!c) return "computer";
+    const t = tilde(c);
+    if (t === "~") return "~";
+    return t.split("/").filter(Boolean).pop() || t;
+  };
   return (
     <button
       class={`inboxrow ${app.activeId() === s().id ? "inboxrow--active" : ""}`}
@@ -35,32 +50,48 @@ function Row(props: { s: Sess; onOpen: (id: string) => void }) {
       }}
     >
       <span class="inboxrow__avatar">
-        <Buddy k={s().id} size={40} />
-        <span class={`dot dot--${dot()} inboxrow__dot`}>
-          <Show when={dot() === "working"}>
-            <i /><i /><i />
-          </Show>
-        </span>
+        <Buddy k={s().id} size={44} />
       </span>
       <span class="inboxrow__body">
         <span class="inboxrow__top">
-          <span class="inboxrow__title">{sessionTitle(s())}</span>
-          <span class="inboxrow__time">{ago(Math.max(s().lastAt || 0, m().previewAt || 0, s().createdAt || 0))}</span>
+          <Show when={unread()}>
+            <span class="inboxrow__unread" />
+          </Show>
+          <span class={`inboxrow__title ${unread() ? "inboxrow__title--bold" : ""}`}>
+            {sessionTitle(s())}
+          </span>
+          <Show when={s().pinned}>
+            <I.pin size={10} />
+          </Show>
+          <span class="inboxrow__time">
+            {clockTime(Math.max(s().lastAt || 0, m().previewAt || 0, s().createdAt || 0))}
+          </span>
         </span>
-        <span class="inboxrow__preview">
-          {m().streaming
-            ? "Working…"
-            : sessionPreview(m().preview) || sessionPreview(s().preview) || tilde(s().cwd) || "No messages yet"}
+        <span class="inboxrow__sub">
+          <span class={`dot dot--${dot()}`}>
+            <Show when={dot() === "working"}>
+              <i /><i /><i />
+            </Show>
+          </span>
+          <span class="inboxrow__ctx">
+            <Show when={s().cwd} fallback={<I.screen size={10} />}>
+              <I.folder size={10} />
+            </Show>
+            {cwdLabel()}
+          </span>
+          <span class={`inboxrow__preview ${m().streaming ? "inboxrow__preview--live" : ""}`}>
+            {m().streaming
+              ? "Working…"
+              : sessionPreview(m().preview) || sessionPreview(s().preview) || "No messages yet"}
+          </span>
         </span>
       </span>
-      <Show when={s().pinned}>
-        <span class="inboxrow__pin"><I.pin size={12} /></span>
-      </Show>
     </button>
   );
 }
 
 export function Inbox(props: { onOpen: (id: string) => void }) {
+  const [searchOpen, setSearchOpen] = createSignal(false);
   const filtered = createMemo(() => {
     const q = app.query().toLowerCase();
     const list = app.sessions.filter((s) => (app.showHidden() ? true : !s.hidden));
@@ -72,72 +103,81 @@ export function Inbox(props: { onOpen: (id: string) => void }) {
         (app.meta[s.id]?.preview || s.preview || "").toLowerCase().includes(q)
     );
   });
+  const hiddenCount = createMemo(() => app.sessions.filter((s) => s.hidden).length);
   const host = () => app.hostInfo();
-  const connLabel = () =>
-    app.conn() === "connected" ? `${rig.host}:${rig.port}` : app.conn() === "connecting" ? "connecting…" : "offline";
+  const initial = () => (host()?.hostname || "R").slice(0, 1).toUpperCase();
 
   return (
     <div class="inbox">
-      <div class="inbox__head">
-        <button class="inbox__rig" onClick={() => app.setDrawerOpen(!app.drawerOpen())} title="Rig menu">
-          <Buddy k="remote" shape="cloud" color="#3D96F8" size={32} />
-          <span class="inbox__riginfo">
-            <span class="inbox__rigname">{host()?.hostname || "Remote rig"}</span>
-            <span class={`inbox__rigsub inbox__rigsub--${app.conn()}`}>{connLabel()}</span>
-          </span>
+      <div class="inbox__toolbar">
+        <button
+          class="inbox__avatbtn"
+          title="Rig menu"
+          onClick={() => app.setDrawerOpen(!app.drawerOpen())}
+        >
+          {initial()}
         </button>
-        <button class="circle-btn" title="New agent" onClick={() => app.setNewSheet(true)}>
-          <I.plus size={17} />
+        <span style={{ flex: 1 }} />
+        <button
+          class="circle-btn circle-btn--pill"
+          title="Search"
+          onClick={() => {
+            setSearchOpen(!searchOpen());
+            if (!searchOpen()) app.setQuery("");
+          }}
+        >
+          <I.search size={16} />
+        </button>
+        <button class="circle-btn circle-btn--pill" title="New agent" onClick={() => app.setNewSheet(true)}>
+          <I.plus size={19} />
         </button>
       </div>
-      <div class="inbox__search">
-        <I.search size={14} />
-        <input
-          placeholder="Search threads"
-          value={app.query()}
-          onInput={(e) => app.setQuery(e.currentTarget.value)}
-        />
-      </div>
+      <Show when={searchOpen()}>
+        <div class="inbox__searchrow">
+          <I.search size={15} />
+          <input
+            placeholder="Search bots"
+            value={app.query()}
+            autofocus
+            onInput={(e) => app.setQuery(e.currentTarget.value)}
+          />
+          <Show when={app.query()}>
+            <button onClick={() => app.setQuery("")}>
+              <I.x size={14} />
+            </button>
+          </Show>
+        </div>
+      </Show>
       <div class="inbox__list">
         <Show
           when={filtered().length}
           fallback={
             <div class="inbox__empty">
-              <Buddy k="remote" size={84} />
-              <p>No threads yet.</p>
-              <p class="inbox__emptysub">Tap + to start one — the rig does the work.</p>
+              <span class="inbox__emptytile">
+                <Buddy k="remote" size={84} />
+              </span>
+              <p>No bots yet</p>
+              <p class="inbox__emptysub">
+                Tap + above — it works on your real computer,{"\n"}or pick a folder for repo work.
+              </p>
             </div>
           }
         >
           <For each={filtered()}>{(s) => <Row s={s} onOpen={props.onOpen} />}</For>
         </Show>
       </div>
-      <div class="inbox__foot">
-        <button class="inbox__tool" onClick={() => (location.hash = "#/files")} title="Files">
-          <I.folder size={16} />
+      <Show when={hiddenCount() && !app.showHidden()}>
+        <button class="inbox__hiddenfoot" onClick={() => app.setShowHidden(true)}>
+          <I.eye size={12} />
+          {hiddenCount()} hidden thread{hiddenCount() === 1 ? "" : "s"} — tap to show
         </button>
-        <button class="inbox__tool" onClick={() => (location.hash = "#/terminal")} title="Terminal">
-          <I.terminal size={16} />
+      </Show>
+      <Show when={app.showHidden() && hiddenCount()}>
+        <button class="inbox__hiddenfoot" onClick={() => app.setShowHidden(false)}>
+          <I.eyeOff size={12} />
+          Hide hidden threads
         </button>
-        <button class="inbox__tool" onClick={() => app.setScreenPanel(!app.screenPanel())} title="Screen">
-          <I.screen size={16} />
-        </button>
-        <button class="inbox__tool" onClick={() => app.setRoutinesSheet(true)} title="Routines">
-          <I.clock size={16} />
-        </button>
-        <button class="inbox__tool" onClick={() => app.setAuthSheet(true)} title="Accounts">
-          <I.key size={16} />
-        </button>
-        <button
-          class="inbox__tool"
-          onClick={() => app.setTheme(app.theme() === "dark" ? "light" : "dark")}
-          title="Theme"
-        >
-          <Show when={app.theme() === "dark"} fallback={<I.moon size={16} />}>
-            <I.sun size={16} />
-          </Show>
-        </button>
-      </div>
+      </Show>
     </div>
   );
 }
