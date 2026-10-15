@@ -20,7 +20,7 @@ function ShotCard(props: { row: Row }) {
     }
   );
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center", margin: "10px 0" }}>
+    <div class="row-in row-agent row-gap--sm">
       <button class="shotcard" onClick={() => app.setScreenPanel(true)} title={props.row.shotCaption}>
         <Show when={img()} fallback={<div class="shotcard__ph">loading…</div>}>
           <img src={img()!} alt={props.row.shotCaption || "screenshot"} />
@@ -39,7 +39,7 @@ function TermCard(props: { row: Row }) {
     return open() ? t().out : lines.slice(0, 8).join("\n") + (lines.length > 8 ? `\n… ${lines.length - 8} more` : "");
   };
   return (
-    <div class="row-in termcard-wrap">
+    <div class="row-in row-agent row-gap--sm termcard-wrap">
       <div class={`termcard ${t().failed ? "termcard--failed" : ""}`}>
         <div class="termcard__head">
           <span class="termcard__cmd" title={t().cmd}>
@@ -67,7 +67,7 @@ function FileCard(props: { row: Row }) {
     location.hash = `#/file?path=${encodeURIComponent(path())}&dir=${encodeURIComponent(dir)}`;
   };
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+    <div class="row-in row-agent row-gap--sm">
       <button class={`filecard ${f().failed ? "filecard--failed" : ""}`} onClick={open}>
         <I.file size={16} />
         <span class="filecard__name">{f().name}</span>
@@ -109,7 +109,7 @@ function DeliverCard(props: { row: Row }) {
     setBusy(false);
   };
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+    <div class="row-in row-agent row-gap--sm">
       <button class="filecard filecard--deliver" onClick={download} disabled={busy()}>
         <I.download size={16} />
         <span class="filecard__name">{d().name}</span>
@@ -133,7 +133,7 @@ function SubCard(props: { row: Row }) {
     else app.setSpawnParent(props.row.sub?.key || null);
   };
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+    <div class="row-in row-agent row-gap--sm">
       <button class={`subcard ${running() ? "subcard--live" : ""}`} onClick={open}>
         <span class="subcard__badge">{running() ? <span class="mini-dots"><i /><i /><i /></span> : <I.users size={15} />}</span>
         <span class="subcard__body">
@@ -151,7 +151,7 @@ function SubCard(props: { row: Row }) {
 function ApprovalCard(props: { row: Row; respond: (id: string, ok: boolean) => void }) {
   const a = () => props.row.approval!;
   return (
-    <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+    <div class="row-in row-agent row-gap--sm">
       <div class={`approve ${a().state === "done" ? "approve--done" : ""}`}>
         <div class="approve__title">
           <I.shield size={15} /> {a().title}
@@ -161,7 +161,14 @@ function ApprovalCard(props: { row: Row; respond: (id: string, ok: boolean) => v
         </Show>
         <Show
           when={a().state !== "done"}
-          fallback={<div class="approve__resolved">{a().doneLabel || (a().resolved === "primary" ? "Approved" : "Denied")}</div>}
+          fallback={
+            <div class="approve__resolved">
+              <Show when={a().resolved !== "secondary"} fallback={<I.x size={11} />}>
+                <I.check size={11} />
+              </Show>
+              {a().doneLabel || (a().resolved === "primary" ? "Approved" : "Denied")}
+            </div>
+          }
         >
           <div class="approve__btns">
             <button class="btn-secondary" onClick={() => props.respond(a().reqId || "", false)}>
@@ -287,7 +294,7 @@ export function RowView(props: {
       </Show>
       {/* prog/event rows are filtered from display — mobile thread.tsx parity */}
       <Show when={r().kind === "error"}>
-        <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
+        <div class="row-in row-agent row-gap--sm">
           <div class="errorcard">
             <I.warning size={14} /> {r().text}
           </div>
