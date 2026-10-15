@@ -107,7 +107,13 @@ export class RigClient {
       clearTimeout(w.timer);
       w.resolve(f);
     }
-    this.handlers.forEach((h) => h(f));
+    this.handlers.forEach((h) => {
+      try {
+        h(f);
+      } catch (err) {
+        ((window as any).__herr ||= []).push(`${f.type}: ${String((err as any)?.stack || err)}`);
+      }
+    });
   }
 
   waitFor(type: string, ms = 15000): Promise<Frame> {

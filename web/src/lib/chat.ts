@@ -1,6 +1,5 @@
 // ChatEngine — per-session transcript builder. Faithful port of
 // mobile/src/useChat.ts row-folding semantics to a Solid store.
-import { createStore, produce } from "solid-js/store";
 import { createSignal } from "solid-js";
 import { rig, Frame } from "./rig";
 import { app, messageText } from "./store";
@@ -299,8 +298,11 @@ const rowKey = (r: Row) => `${r.kind}:${r.text ?? r.shot ?? r.deliver?.name ?? r
 // ---------------------------------------------------------------------------
 export class ChatEngine {
   sessionId: string;
-  rows: Row[] = [];
+  get rows(): Row[] {
+    return this._rows();
+  }
   setRows: (fn: (prev: Row[]) => Row[]) => void;
+  private _rows: () => Row[];
   streaming: () => boolean;
   setStreaming: (v: boolean) => void;
   status: () => string;
@@ -342,9 +344,9 @@ export class ChatEngine {
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
-    const [rows, setRows] = createStore<Row[]>([]);
-    this.rows = rows;
-    this.setRows = (fn) => setRows(produce(fn as any) as any);
+    const [rows, setRows] = createSignal<Row[]>([], { equals: false });
+    this._rows = rows;
+    this.setRows = (fn) => setRows((prev) => fn(prev));
     [this.streaming, this.setStreaming] = createSignal(false);
     [this.status, this.setStatus] = createSignal("On it…");
     [this.streamText, this.setStreamText] = createSignal("");
@@ -394,10 +396,22 @@ export class ChatEngine {
     const buf = this.replayBuf;
     if (!buf) return;
     this.replayBuf = null;
-    for (const inner of buf) {
-      try {
-        this.handleReplay(inner, true);
-      } catch {}
+    this.batching++;
+    try {
+      for (const inner of buf) {
+        try {
+          this.handleReplay(inner, true);
+        } catch {}
+      }
+    } finally {
+      this.batching--;
+      if (this.pendingRows.length) {
+        const pr = this.pendingRows;
+        this.pendingRows = [];
+        this.setRows((prev) => [...prev, ...pr].slice(-1600));
+      }
+      // ring replay may be all delta noise — pull persisted history when thin
+      if (this.rows.length < 40 && this.minSeqSeen > 1) this.loadOlder();
     }
   };
 
@@ -407,6 +421,8 @@ export class ChatEngine {
       clearTimeout(this.quietT);
       this.quietT = null;
       this.flushReplay();
+      // ring may carry only delta noise — page the persisted log for real rows
+      if (this.rows.length < 40 && this.minSeqSeen > 1) this.loadOlder();
       return;
     }
     if (f.type === "error" && (f.sessionId === this.sessionId || !f.sessionId)) {
@@ -449,6 +465,9 @@ export class ChatEngine {
             : [];
         return [...clean, ...gapSep, ...head];
       });
+      // keep paging until the transcript is readable or the log is exhausted
+      if (this.rows.length < 40 && !this.historyExhausted() && this.minSeqSeen > 1)
+        queueMicrotask(() => this.loadOlder());
       return;
     }
     if (f.type !== "rpc" || f.sessionId !== this.sessionId) return;
@@ -478,13 +497,31 @@ export class ChatEngine {
   }
 
   // ---- row helpers ----
+  private batching = 0;
+  private pendingRows: Row[] = [];
+  private pushRow(r: Row, prev: Row[]): Row[] {
+    const next = [...prev];
+    const lastMsg = [...next.slice(-200)].reverse().find((x) => x.kind !== "sep" && x.at);
+    if (r.at && (!lastMsg || r.at - (lastMsg.at || 0) > GAP_MS))
+      next.push({ id: nid(), kind: "sep", text: sepLabel(r.at) });
+    next.push(r);
+    return next;
+  }
   private addRow = (r: Row, dedupeLast = false) => {
     r = { ...r, at: r.at ?? now() };
+    if (this.batching > 0) {
+      const last = this.pendingRows[this.pendingRows.length - 1];
+      if (dedupeLast && last && last.kind === r.kind && last.text === r.text) return;
+      // seed the gap check from committed rows when the batch is empty
+      const base = this.pendingRows.length ? this.pendingRows : this.rows.slice(-1);
+      this.pendingRows = this.pushRow(r, base).slice(this.pendingRows.length ? 0 : base.length);
+      return;
+    }
     this.setRows((prev) => {
       const last = prev[prev.length - 1];
       if (dedupeLast && last && last.kind === r.kind && last.text === r.text) return prev;
       const next = [...prev];
-      const lastMsg = [...next].reverse().find((x) => x.kind !== "sep" && x.at);
+      const lastMsg = [...next.slice(-200)].reverse().find((x) => x.kind !== "sep" && x.at);
       if (r.at && (!lastMsg || r.at - (lastMsg.at || 0) > GAP_MS))
         next.push({ id: nid(), kind: "sep", text: sepLabel(r.at) });
       next.push(r);
@@ -493,14 +530,26 @@ export class ChatEngine {
   };
   private addRowOnce = (r: Row) => {
     r = { ...r, at: r.at ?? now() };
-    this.setRows((prev) => {
+    if (this.batching > 0) {
+      const tail = this.pendingRows.slice(-200);
       if (r.kind === "event" || r.kind === "error") {
-        if (prev.some((x) => (x.kind === "event" || x.kind === "error") && x.text === r.text)) return prev;
+        if (tail.some((x) => (x.kind === "event" || x.kind === "error") && x.text === r.text)) return;
       } else if (r.kind === "shot") {
-        if (prev.some((x) => x.kind === "shot" && x.shot === r.shot)) return prev;
-      } else if (prev.some((x) => x.kind === r.kind && x.text === r.text)) return prev;
+        if (tail.some((x) => x.kind === "shot" && x.shot === r.shot)) return;
+      } else if (tail.some((x) => x.kind === r.kind && x.text === r.text)) return;
+      const base = this.pendingRows.length ? this.pendingRows : this.rows.slice(-1);
+      this.pendingRows = this.pushRow(r, base).slice(this.pendingRows.length ? 0 : base.length);
+      return;
+    }
+    this.setRows((prev) => {
+      const tail = prev.slice(-200);
+      if (r.kind === "event" || r.kind === "error") {
+        if (tail.some((x) => (x.kind === "event" || x.kind === "error") && x.text === r.text)) return prev;
+      } else if (r.kind === "shot") {
+        if (tail.some((x) => x.kind === "shot" && x.shot === r.shot)) return prev;
+      } else if (tail.some((x) => x.kind === r.kind && x.text === r.text)) return prev;
       const next = [...prev];
-      const lastMsg = [...next].reverse().find((x) => x.kind !== "sep" && x.at);
+      const lastMsg = [...tail].reverse().find((x) => x.kind !== "sep" && x.at);
       if (r.at && (!lastMsg || r.at - (lastMsg.at || 0) > GAP_MS))
         next.push({ id: nid(), kind: "sep", text: sepLabel(r.at) });
       next.push(r);
@@ -1055,6 +1104,7 @@ export class ChatEngine {
 
 // engine cache — one per session, survives route navigation
 const engines = new Map<string, ChatEngine>();
+if (typeof window !== "undefined") (window as any).__engines = engines;
 export function engineFor(sessionId: string): ChatEngine {
   let e = engines.get(sessionId);
   if (!e) {

@@ -1,7 +1,7 @@
-// Thread — the session view: virtualized transcript, streaming bubble,
-// working row, approvals, composer, header actions.
+// Thread — the session view: transcript (capped window + history paging),
+// streaming bubble, working row, approvals, composer, header actions.
 import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount } from "solid-js";
-import { VList } from "virtua/solid";
+
 import { app, sessionTitle } from "../lib/store";
 import { rig, tilde } from "../lib/rig";
 import { engineFor, ChatEngine, Row, findPrUrl } from "../lib/chat";
@@ -173,16 +173,18 @@ export function Thread(props: { id: string }) {
             <span class="spinner" /> Loading earlier…
           </div>
         </Show>
-        <VList class="thread__list" data={dispRows()}>
-          {(row, i) => (
-            <RowView
-              row={row}
-              prev={i() > 0 ? dispRows()[i() - 1] : undefined}
-              next={i() < dispRows().length - 1 ? dispRows()[i() + 1] : undefined}
-              respond={(id, ok) => engine().respondApproval(id, ok)}
-            />
-          )}
-        </VList>
+        <div class="thread__list">
+          <For each={dispRows()}>
+            {(row, i) => (
+              <RowView
+                row={row}
+                prev={i() > 0 ? dispRows()[i() - 1] : undefined}
+                next={i() < dispRows().length - 1 ? dispRows()[i() + 1] : undefined}
+                respond={(id, ok) => engine().respondApproval(id, ok)}
+              />
+            )}
+          </For>
+        </div>
         <Show when={streaming()}>
           <Show
             when={engine().streamText()}

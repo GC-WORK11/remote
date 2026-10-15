@@ -1166,3 +1166,6 @@ html.buddy-glance .buddy__eyes { translate: 0 5%; transition: translate .18s eas
 .checkcard__glyph{width:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--sub);flex:none}
 .checkcard__item.is-failed .checkcard__glyph{color:var(--bad)}
 .checkcard__item:not(.is-done):not(.is-failed) .checkcard__glyph{color:var(--ink-soft,var(--ink))}
+
+/* native virtualization for transcript rows */
+.thread__list > *{content-visibility:auto;contain-intrinsic-size:auto 40px}

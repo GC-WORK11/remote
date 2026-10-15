@@ -21,6 +21,12 @@ export default function App(props: { children?: JSX.Element }) {
     // /?host=&port= deep-link, or remembered host — auto-connect
     const q = new URLSearchParams(location.search);
     const qh = q.get("host") || h || (location.port === "8790" ? location.hostname : null);
+    // /?token= shareable login — works from any deep link, not just /
+    const qt = q.get("token");
+    if (qt) {
+      rig.saveToken(qh || location.hostname, qt);
+      history.replaceState(null, "", location.pathname + location.hash);
+    }
     if (qh) {
       await rig.loadToken(qh);
       if (rig.token) {
