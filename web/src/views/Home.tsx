@@ -7,7 +7,7 @@ import { Inbox } from "../components/Inbox";
 import { Thread } from "../components/Thread";
 import { ContextPanel } from "../components/ContextPanel";
 import { Composer } from "../components/Composer";
-import { Mascot } from "../components/Mascot";
+import { Buddy } from "../components/Buddy";
 
 export default function Home() {
   const params = useParams();
@@ -29,7 +29,7 @@ export default function Home() {
       fallback={
         <div class="thread thread--empty">
           <div class="thread__hero">
-            <Mascot size={120} state="peek" />
+            <Buddy k="remote" size={110} />
             <h2>Your rig, from anywhere</h2>
             <p class="thread__herosub">Pick a thread — or just say what to do.</p>
             <Composer onSent={() => {}} placeholder="Ask anything — the rig does the work" />

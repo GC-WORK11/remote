@@ -1,9 +1,9 @@
 // Inbox rail — rig header, search, session list (pinned first), footer tools.
 import { For, Show, createMemo } from "solid-js";
-import { app, sessionTitle, Sess } from "../lib/store";
+import { app, sessionTitle, sessionPreview, Sess } from "../lib/store";
 import { rig, tilde } from "../lib/rig";
 import I from "./Icon";
-import { Mascot, MascotAvatar } from "./Mascot";
+import { Buddy, buddyName } from "./Buddy";
 
 function ago(ts?: number): string {
   if (!ts) return "";
@@ -35,7 +35,7 @@ function Row(props: { s: Sess; onOpen: (id: string) => void }) {
       }}
     >
       <span class="inboxrow__avatar">
-        <MascotAvatar seed={s().id} size={38} working={dot() === "working"} />
+        <Buddy k={s().id} size={40} />
         <span class={`dot dot--${dot()} inboxrow__dot`}>
           <Show when={dot() === "working"}>
             <i /><i /><i />
@@ -50,7 +50,7 @@ function Row(props: { s: Sess; onOpen: (id: string) => void }) {
         <span class="inboxrow__preview">
           {m().streaming
             ? "Working…"
-            : m().preview || s().preview || tilde(s().cwd) || "No messages yet"}
+            : sessionPreview(m().preview) || sessionPreview(s().preview) || tilde(s().cwd) || "No messages yet"}
         </span>
       </span>
       <Show when={s().pinned}>
@@ -80,7 +80,7 @@ export function Inbox(props: { onOpen: (id: string) => void }) {
     <div class="inbox">
       <div class="inbox__head">
         <button class="inbox__rig" onClick={() => app.setDrawerOpen(!app.drawerOpen())} title="Rig menu">
-          <Mascot size={30} state={app.conn() === "connected" ? "idle" : "sleepy"} />
+          <Buddy k="remote" shape="cloud" color="#3D96F8" size={32} />
           <span class="inbox__riginfo">
             <span class="inbox__rigname">{host()?.hostname || "Remote rig"}</span>
             <span class={`inbox__rigsub inbox__rigsub--${app.conn()}`}>{connLabel()}</span>
@@ -103,7 +103,7 @@ export function Inbox(props: { onOpen: (id: string) => void }) {
           when={filtered().length}
           fallback={
             <div class="inbox__empty">
-              <Mascot size={84} color="lavender" state="sleepy" />
+              <Buddy k="remote" size={84} />
               <p>No threads yet.</p>
               <p class="inbox__emptysub">Tap + to start one — the rig does the work.</p>
             </div>

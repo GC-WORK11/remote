@@ -3,7 +3,7 @@
 import { createSignal, onMount } from "solid-js";
 import { rig, parseRigUri } from "../lib/rig";
 import { app } from "../lib/store";
-import { Mascot } from "../components/Mascot";
+import { Buddy } from "../components/Buddy";
 import I from "../components/Icon";
 
 export default function Connect() {
@@ -23,6 +23,14 @@ export default function Connect() {
     if (saved) setHost(saved);
     const sp = localStorage.getItem("rigPort");
     if (sp) setPort(sp);
+    // shareable login link: http://rig/?token=<device token> drops straight in
+    const urlToken = new URLSearchParams(location.search).get("token");
+    if (urlToken) {
+      rig.saveToken(host() || location.hostname, urlToken);
+      history.replaceState(null, "", location.pathname + location.hash);
+      await connectWithToken();
+      return;
+    }
     // returning device — token on file, straight in
     if (rig.token) {
       await connectWithToken();
@@ -81,7 +89,7 @@ export default function Connect() {
   return (
     <div class="connect">
       <div class="connect__card card">
-        <Mascot size={92} color="gold" state={phase() === "pairing" ? "peek" : "idle"} />
+        <Buddy k="remote" size={96} />
         <h1>Remote</h1>
         <p class="connect__tag">Your laptop is the computer. This browser is the remote.</p>
         <div class="connect__form">

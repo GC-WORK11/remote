@@ -4,11 +4,7 @@ import { Row, fmtMs } from "../lib/chat";
 import { rig } from "../lib/rig";
 import { app } from "../lib/store";
 import { Markdown } from "./Markdown";
-import { MascotAvatar } from "./Mascot";
 import I from "./Icon";
-
-// agent identity for the avatar column — {seed, name} from the owning session
-export type AgentId = { seed?: string; name?: string };
 
 function img64(f: any): string | null {
   if (!f || typeof f.imageBase64 !== "string") return null;
@@ -235,7 +231,7 @@ function ImageStrip(props: { images: string[] }) {
   );
 }
 
-export function RowView(props: { row: Row; respond: (id: string, ok: boolean) => void; agent?: AgentId }) {
+export function RowView(props: { row: Row; respond: (id: string, ok: boolean) => void }) {
   const r = () => props.row;
   return (
     <>
@@ -256,12 +252,8 @@ export function RowView(props: { row: Row; respond: (id: string, ok: boolean) =>
       </Show>
       <Show when={r().kind === "agent"}>
         <div class="row-in row-agent">
-          <MascotAvatar seed={props.agent?.seed} size={32} />
-          <div class="agentstack">
-            <span class="agentname">{props.agent?.name || "Agent"}</span>
-            <div class="bubble bubble--agent">
-              <Markdown text={r().text || ""} />
-            </div>
+          <div class="bubble bubble--agent">
+            <Markdown text={r().text || ""} />
           </div>
         </div>
       </Show>

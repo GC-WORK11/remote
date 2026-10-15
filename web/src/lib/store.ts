@@ -77,11 +77,20 @@ export function messageText(message: any): string {
 }
 
 export function sessionTitle(s: any): string {
-  const t = (s?.title || "").trim();
+  const t = typeof s?.title === "string" ? s.title.trim() : "";
   if (t) return t;
-  const cwd = s?.cwd || "";
+  const cwd = typeof s?.cwd === "string" ? s.cwd : "";
   if (cwd) return cwd.replace(/\/+$/, "").split("/").pop() || cwd;
   return "Conversation";
+}
+
+// preview fields can arrive as objects from some harnesses — render text only
+export function sessionPreview(v: any): string {
+  if (!v) return "";
+  if (typeof v === "string") return v;
+  if (typeof v.text === "string") return v.text;
+  if (typeof v.message === "string") return v.message;
+  return "";
 }
 
 const sortSessions = (list: Sess[]) =>

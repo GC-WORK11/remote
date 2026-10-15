@@ -8,7 +8,7 @@ import { engineFor, ChatEngine } from "../lib/chat";
 import { RowView } from "./RowView";
 import { Composer } from "./Composer";
 import { Markdown } from "./Markdown";
-import { MascotAvatar } from "./Mascot";
+import { Buddy, buddyName } from "./Buddy";
 import I from "./Icon";
 
 export function Thread(props: { id: string }) {
@@ -60,7 +60,7 @@ export function Thread(props: { id: string }) {
           <I.chevL size={17} />
         </button>
         <div class="thread__title" onClick={() => app.setSessionSheetId(props.id)}>
-          <MascotAvatar seed={props.id} size={30} working={streaming()} />
+          <Buddy k={props.id} size={26} />
           <span class="thread__name">{session() ? sessionTitle(session()) : "…"}</span>
           <Show when={meta().model || engine().model()}>
             <span class="thread__model">{meta().model || engine().model()}</span>
@@ -86,40 +86,30 @@ export function Thread(props: { id: string }) {
         </Show>
         <VList class="thread__list" data={engine().rows}>
           {(row) => (
-            <RowView
-              row={row}
-              respond={(id, ok) => engine().respondApproval(id, ok)}
-              agent={{ seed: props.id, name: session() ? sessionTitle(session()!) : "Agent" }}
-            />
+            <RowView row={row} respond={(id, ok) => engine().respondApproval(id, ok)} />
           )}
         </VList>
         <Show when={streaming()}>
-          <div class="row-in row-agent">
-            <MascotAvatar seed={props.id} size={32} working />
-            <div class="agentstack">
-              <span class="agentname">
-                {session() ? sessionTitle(session()!) : "Agent"}
-                <span class="agentname__status">is working…</span>
-              </span>
+          <Show
+            when={engine().streamText()}
+            fallback={
+              <div class="workingrow">
+                <Buddy k={props.id} size={20} />
+                <span class="workingrow__label">
+                  {buddyName(props.id)} is working
+                </span>
+                <span class="workingrow__detail">
+                  {engine().status()}
+                  {engine().workSec() ? ` · ${engine().workSec()}s` : ""}
+                </span>
+              </div>
+            }
+          >
+            <div class="row-in row-agent">
               <div class="bubble bubble--agent bubble--live">
-                <Show when={engine().streamText()}>
-                  <Markdown text={engine().streamText()} />
-                </Show>
+                <Markdown text={engine().streamText()} />
                 <span class="caret" />
               </div>
-            </div>
-          </div>
-          <Show when={!engine().streamText()}>
-            <div class="workingrow">
-              <span class="mini-dots">
-                <i />
-                <i />
-                <i />
-              </span>
-              <span>
-                {engine().status()}
-                {engine().workSec() ? ` · ${engine().workSec()}s` : ""}
-              </span>
             </div>
           </Show>
         </Show>
