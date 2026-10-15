@@ -178,6 +178,16 @@ export function Inbox(props: { onOpen: (id: string) => void }) {
           Hide hidden threads
         </button>
       </Show>
+      <Show when={app.conn() === "connected" && app.authProviders().length && !app.authProviders().some((p: any) => p.signedIn || p.authed)}>
+        <button class="connectcard" onClick={() => app.setAuthSheet(true)}>
+          <I.key size={17} />
+          <span class="connectcard__body">
+            <span class="connectcard__title">Add an account</span>
+            <span class="connectcard__sub">Codex, Claude, Command Code — sign in on your laptop.</span>
+          </span>
+          <I.chevR size={16} />
+        </button>
+      </Show>
     </div>
   );
 }

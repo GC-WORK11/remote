@@ -274,9 +274,7 @@ export function RowView(props: {
       <Show when={r().kind === "check"}>
         <CheckRow row={r()} />
       </Show>
-      <Show when={r().kind === "event" || r().kind === "prog"}>
-        <div class={`eventline ${r().live ? "eventline--live" : ""}`}>{r().text}</div>
-      </Show>
+      {/* prog/event rows are filtered from display — mobile thread.tsx parity */}
       <Show when={r().kind === "error"}>
         <div class="row-in" style={{ display: "flex", "justify-content": "center" }}>
           <div class="errorcard">

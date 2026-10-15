@@ -4,7 +4,7 @@ import { For, Show, createEffect, createMemo, createSignal, onCleanup, onMount }
 import { VList } from "virtua/solid";
 import { app, sessionTitle } from "../lib/store";
 import { rig, tilde } from "../lib/rig";
-import { engineFor, ChatEngine } from "../lib/chat";
+import { engineFor, ChatEngine, Row, findPrUrl } from "../lib/chat";
 import { RowView } from "./RowView";
 import { Composer } from "./Composer";
 import { Markdown } from "./Markdown";
@@ -19,6 +19,31 @@ export function Thread(props: { id: string }) {
   const [atBottom, setAtBottom] = createSignal(true);
 
   const streaming = () => engine().streaming() || (!!meta().streaming && !meta().dead);
+
+  // mobile parity: prog/event/check filtered, consecutive agent rows merge
+  const dispRows = createMemo(() => {
+    const out: Row[] = [];
+    for (const r of engine().rows) {
+      if (r.kind === "prog" || r.kind === "event") continue;
+      const last = out[out.length - 1];
+      if (r.kind === "agent" && last?.kind === "agent" && !r.streaming && !last.streaming) {
+        last.text = `${last.text || ""}\n\n${r.text || ""}`.trim();
+        continue;
+      }
+      out.push(r.kind === "agent" ? { ...r } : r);
+    }
+    return out;
+  });
+
+  // PR surfaced in the transcript → footer card + merge pill
+  const prUrl = createMemo(() => {
+    const agents = dispRows().filter((r) => r.kind === "agent" && r.text);
+    for (let i = agents.length - 1; i >= 0; i--) {
+      const u = findPrUrl(agents[i].text!);
+      if (u) return u;
+    }
+    return null;
+  });
 
   // stick to bottom while reading live output
   const scrollBottom = (smooth = false) => {
@@ -101,12 +126,12 @@ export function Thread(props: { id: string }) {
             <span class="spinner" /> Loading earlier…
           </div>
         </Show>
-        <VList class="thread__list" data={engine().rows}>
+        <VList class="thread__list" data={dispRows()}>
           {(row, i) => (
             <RowView
               row={row}
-              prev={i() > 0 ? engine().rows[i() - 1] : undefined}
-              next={i() < engine().rows.length - 1 ? engine().rows[i() + 1] : undefined}
+              prev={i() > 0 ? dispRows()[i() - 1] : undefined}
+              next={i() < dispRows().length - 1 ? dispRows()[i() + 1] : undefined}
               respond={(id, ok) => engine().respondApproval(id, ok)}
             />
           )}
@@ -148,7 +173,22 @@ export function Thread(props: { id: string }) {
           <I.chevD size={14} /> Latest
         </button>
       </Show>
-      <Composer engine={engine()} placeholder="Message…" />
+      <Show when={prUrl()}>
+        <div class="prfoot">
+          <button
+            class="prfoot__card"
+            onClick={() => (location.hash = `#/pr?url=${encodeURIComponent(prUrl()!)}&sid=${props.id}`)}
+          >
+            <I.branch size={15} />
+            <span class="prfoot__title">{prUrl()!.replace(/^https?:\/\//, "").split("/").slice(-3).join("/")}</span>
+            <span class="prfoot__state">Open</span>
+          </button>
+          <button class="mergepill" onClick={() => app.setMergeSheetUrl(prUrl()!)}>
+            <I.check size={12} /> Ready to merge <I.chevD size={11} style={{ transform: "rotate(180deg)" }} />
+          </button>
+        </div>
+      </Show>
+      <Composer engine={engine()} placeholder={session()?.cwd ? "Send follow-up" : `Ask ${buddyName(props.id)}`} />
     </div>
   );
 }

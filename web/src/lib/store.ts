@@ -86,11 +86,22 @@ export function sessionTitle(s: any): string {
 
 // preview fields can arrive as objects from some harnesses — render text only
 export function sessionPreview(v: any): string {
+  let s = "";
   if (!v) return "";
-  if (typeof v === "string") return v;
-  if (typeof v.text === "string") return v.text;
-  if (typeof v.message === "string") return v.message;
-  return "";
+  if (typeof v === "string") s = v;
+  else if (typeof v.text === "string") s = v.text;
+  else if (typeof v.message === "string") s = v.message;
+  else return "";
+  // strip markdown noise — previews are plain text
+  return s
+    .replace(/```[\s\S]*?```/g, "code")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/\*\*([^*]*)\*\*/g, "$1")
+    .replace(/\*([^*]*)\*/g, "$1")
+    .replace(/#+\s*/g, "")
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 const sortSessions = (list: Sess[]) =>

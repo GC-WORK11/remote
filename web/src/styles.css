@@ -1126,3 +1126,20 @@ html.buddy-glance .buddy__eyes { translate: 0 5%; transition: translate .18s eas
 .minicheck{width:14px;height:14px;border-radius:50%;background:var(--ok);color:#fff;display:inline-grid;place-items:center;flex:none}
 .checkcard__doneword{font-size:13px;font-weight:600;color:var(--ink-soft,var(--ink))}
 .checkcard__count{font-size:10.5px;color:var(--faint);font-weight:500}
+
+/* ── PR footer card + merge pill ── */
+.prfoot{max-width:780px;margin:0 auto;width:100%;padding:0 18px}
+.prfoot__card{display:flex;align-items:center;gap:9px;width:100%;padding:14px;background:var(--agent-bg);border:1px solid var(--hairline);border-radius:14px;color:var(--ink);font-family:inherit;cursor:pointer;text-align:left;margin-top:10px}
+.prfoot__card:active{opacity:.85}
+.prfoot__title{flex:1;min-width:0;font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.prfoot__state{font-size:10.5px;font-weight:700;color:#1FA85C;background:rgba(31,168,92,.13);border-radius:999px;padding:3px 9px;flex:none}
+.mergepill{display:flex;align-items:center;justify-content:center;gap:6px;margin:8px auto 8px;height:36px;padding:0 14px;border-radius:18px;border:none;background:#26262B;color:var(--ok);font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;box-shadow:var(--sh-tight)}
+.mergepill:active{transform:scale(.97)}
+
+/* ── connect card (auth CTA) ── */
+.connectcard{display:flex;align-items:center;gap:11px;background:rgba(255,255,255,.85);border:1px solid var(--hairline);border-radius:20px;padding:15px 13px;box-shadow:var(--sh-tight);cursor:pointer;font-family:inherit;color:var(--ink);text-align:left;width:100%;margin-top:4px}
+.connectcard:active{transform:scale(.98)}
+.connectcard__body{flex:1;min-width:0;display:flex;flex-direction:column}
+.connectcard__title{font-size:15px;font-weight:600}
+.connectcard__sub{font-size:11px;color:var(--sub)}
+.connectcard>.icon:last-child,.connectcard>svg:last-child{color:var(--faint)}
