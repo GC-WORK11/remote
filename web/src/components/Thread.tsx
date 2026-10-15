@@ -173,6 +173,17 @@ export function Thread(props: { id: string }) {
             <span class="spinner" /> Loading earlier…
           </div>
         </Show>
+        <Show when={!dispRows().length && !streaming()}>
+          <div class="thread__empty">
+            <span class="thread__emptytile">
+              <Buddy k={props.id} size={96} />
+            </span>
+            <p class="thread__emptyname">{buddyName(props.id)}</p>
+            <p class="thread__emptysub">
+              {session()?.cwd ? `${tilde(session()!.cwd)} — send a task to start` : "Send a task — it runs on your rig"}
+            </p>
+          </div>
+        </Show>
         <div class="thread__list">
           <For each={dispRows()}>
             {(row, i) => (

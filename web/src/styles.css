@@ -1169,3 +1169,9 @@ html.buddy-glance .buddy__eyes { translate: 0 5%; transition: translate .18s eas
 
 /* native virtualization for transcript rows */
 .thread__list > *{content-visibility:auto;contain-intrinsic-size:auto 40px}
+
+/* thread empty state — big buddy tile, mobile parity */
+.thread__empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:72px 24px;text-align:center}
+.thread__emptytile{width:104px;height:104px;border-radius:30px;background:#EFEDE9;display:grid;place-items:center;box-shadow:var(--sh-tight)}
+.thread__emptyname{font-size:17px;font-weight:650;margin:16px 0 4px}
+.thread__emptysub{font-size:13px;color:var(--sub);margin:0;line-height:1.45}

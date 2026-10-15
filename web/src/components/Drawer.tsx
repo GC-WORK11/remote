@@ -109,9 +109,9 @@ export function Drawer() {
     const v = vit();
     if (!v) return "";
     const parts: string[] = [];
-    if (v.battery != null) parts.push(`${Math.round(v.battery)}%`);
-    if (v.memUsedPct != null) parts.push(`mem ${Math.round(v.memUsedPct)}%`);
-    if (v.uptime != null) parts.push(`up ${Math.floor(v.uptime / 3600)}h`);
+    if (Number.isFinite(+v.battery)) parts.push(`${Math.round(+v.battery)}%`);
+    if (Number.isFinite(+v.memUsedPct)) parts.push(`mem ${Math.round(+v.memUsedPct)}%`);
+    if (Number.isFinite(+v.uptime)) parts.push(`up ${Math.floor(+v.uptime / 3600)}h`);
     return parts.join(" · ");
   };
 

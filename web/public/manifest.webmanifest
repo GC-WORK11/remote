@@ -1,0 +1,19 @@
+{
+  "name": "Remote",
+  "short_name": "Remote",
+  "description": "Your laptop is the computer. This browser is the remote.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F6F4F1",
+  "theme_color": "#F6F4F1",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
