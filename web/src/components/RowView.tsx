@@ -203,9 +203,20 @@ function CheckRow(props: { row: Row }) {
             <For each={items()}>
               {(it) => (
                 <li class={`checkcard__item ${it.done ? "is-done" : ""} ${it.failed ? "is-failed" : ""}`}>
+                  <span class="checkcard__glyph">
+                    {(() => {
+                      const g = { term: "terminal", file: "file", search: "search", computer: "screen", net: "globe", sub: "users", git: "branch", check: "list" }[String(it.cls || "")] || "settings";
+                      const Cmp = (I as any)[g] || I.settings;
+                      return <Cmp size={11} />;
+                    })()}
+                  </span>
                   <span class="checkcard__tick">
-                    <Show when={!it.done} fallback={<I.check size={11} />}>
-                      <span class="mini-dots"><i /><i /><i /></span>
+                    <Show when={it.failed} fallback={
+                      <Show when={!it.done} fallback={<I.check size={11} />}>
+                        <span class="mini-dots"><i /><i /><i /></span>
+                      </Show>
+                    }>
+                      <I.x size={11} />
                     </Show>
                   </span>
                   <span class="checkcard__label">{it.label}</span>

@@ -1143,3 +1143,19 @@ html.buddy-glance .buddy__eyes { translate: 0 5%; transition: translate .18s eas
 .connectcard__title{font-size:15px;font-weight:600}
 .connectcard__sub{font-size:11px;color:var(--sub)}
 .connectcard>.icon:last-child,.connectcard>svg:last-child{color:var(--faint)}
+
+/* ── sub-agents section ── */
+.subagents{max-width:780px;margin:0 auto;width:100%;padding:0 18px}
+.subagents__head{display:flex;align-items:center;gap:6px;width:100%;padding:4px 0;border:none;background:none;color:var(--faint);font-size:10.5px;font-weight:600;letter-spacing:.8px;font-family:inherit;cursor:pointer}
+.subagents__busy{width:6px;height:6px;border-radius:3px;background:var(--ok);flex:none}
+.subagents__add{width:24px;height:24px;border-radius:12px;border:1px solid var(--hairline-strong);background:var(--control-bg,var(--pill-bg));color:var(--ink);display:grid;place-items:center;cursor:pointer}
+.subrow{display:flex;align-items:center;gap:9px;width:100%;padding:6px 0;border:none;border-top:1px solid var(--hairline);background:none;font-family:inherit;cursor:pointer;text-align:left}
+.subrow:active{opacity:.7}
+.subrow__body{flex:1;min-width:0;display:flex;flex-direction:column}
+.subrow__title{font-size:13.5px;font-weight:600;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.subrow__sub{font-size:10.5px;color:var(--sub);margin-top:1px}
+.subrow__sub--live{color:var(--working)}
+.subrow__status{font-size:10.5px;font-weight:600;color:var(--faint);flex:none}
+.checkcard__glyph{width:16px;display:inline-flex;align-items:center;justify-content:center;color:var(--sub);flex:none}
+.checkcard__item.is-failed .checkcard__glyph{color:var(--bad)}
+.checkcard__item:not(.is-done):not(.is-failed) .checkcard__glyph{color:var(--ink-soft,var(--ink))}

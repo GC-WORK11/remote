@@ -17,6 +17,8 @@ export function Thread(props: { id: string }) {
   const meta = createMemo(() => app.meta[props.id] || {});
   let scrollerRef: HTMLDivElement | undefined;
   const [atBottom, setAtBottom] = createSignal(true);
+  const [subsOpen, setSubsOpen] = createSignal(true);
+  const children = createMemo(() => app.sessions.filter((s) => s.parentId === props.id));
 
   const streaming = () => engine().streaming() || (!!meta().streaming && !meta().dead);
 
@@ -120,6 +122,51 @@ export function Thread(props: { id: string }) {
         <button class="toolpill" onClick={() => (location.hash = "#/browser")}><I.globe size={12} />Browser</button>
         <button class="toolpill" onClick={() => (location.hash = "#/repos")}><I.book size={12} />Repos</button>
       </div>
+      <Show when={children().length}>
+        <div class="subagents">
+          <button class="subagents__head" onClick={() => setSubsOpen(!subsOpen())}>
+            <Show when={subsOpen()} fallback={<I.chevR size={11} />}>
+              <I.chevD size={11} />
+            </Show>
+            <span>SUB-AGENTS · {children().length}</span>
+            <span style={{ flex: 1 }} />
+            <Show when={children().some((c) => app.meta[c.id]?.streaming || c.busy)}>
+              <span class="subagents__busy" />
+            </Show>
+            <button
+              class="subagents__add"
+              title="New sub-agent"
+              onClick={(e) => {
+                e.stopPropagation();
+                app.setSpawnParent(props.id);
+              }}
+            >
+              <I.plus size={14} />
+            </button>
+          </button>
+          <Show when={subsOpen()}>
+            <For each={children()}>
+              {(c) => {
+                const cm = () => app.meta[c.id] || {};
+                const st = () =>
+                  cm().streaming || c.busy ? "Working" : cm().dead ? "Ended" : cm().done ? "Idle" : "Idle";
+                return (
+                  <button class="subrow" onClick={() => (location.hash = `#/thread/${c.id}`)}>
+                    <Buddy k={c.id} size={22} />
+                    <span class="subrow__body">
+                      <span class="subrow__title">{sessionTitle(c)}</span>
+                      <span class={`subrow__sub ${st() === "Working" ? "subrow__sub--live" : ""}`}>
+                        {st()}
+                      </span>
+                    </span>
+                    <span class="subrow__status">{st()}</span>
+                  </button>
+                );
+              }}
+            </For>
+          </Show>
+        </div>
+      </Show>
       <div class="thread__scroll" ref={scrollerRef} onScroll={onScroll}>
         <Show when={engine().historyLoading()}>
           <div class="thread__histload">
