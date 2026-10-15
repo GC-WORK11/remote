@@ -800,6 +800,11 @@ static const int64_t g_boot_ms = now_ms();
 static const std::string g_service_token = rig::random_hex(32);
 static std::string g_bind_ip;
 static int g_port = 8790;
+// --www <dir>: serve a static webapp (the Remote browser client) from the
+// same port as the wire. Empty = diagnostics JSON only (mobile contract).
+static std::string g_www;
+// Default agent harness for session.new when the client doesn't name one.
+static std::string g_harness_default = "omp";
 
 // True when `token` is the per-boot service credential (omp child loopback),
 // as opposed to a paired-device token.
@@ -2221,6 +2226,18 @@ struct Recorder {
 static Recorder* g_rec = nullptr;
 static std::mutex g_rec_mutex;
 
+// record.* calls carry the recording id under `recordingId`; the request's
+// `id` field is correlation. Fall back to `id` only when it looks like a real
+// rec- id — older mobile builds sent it that way.
+static std::string rec_id_arg(const json& m) {
+	std::string rid = m.value("recordingId", "");
+	if (rid.empty()) {
+		std::string t = m.value("id", "");
+		if (rec_id_ok(t)) rid = t;
+	}
+	return rid;
+}
+
 static bool rec_id_ok(const std::string& id) {
 	if (id.size() < 5 || id.size() > 64 || id.rfind("rec-", 0) != 0) return false;
 	for (char ch : id)
@@ -2550,7 +2567,17 @@ struct Session {
 	// (handshake + frames); anything else goes through the harness
 	// translator in child_reader and never sees omp-specific frames.
 	std::string harness{"omp"};
-	std::string conv_id; // claude conversation id — persisted for --resume
+	std::string conv_id; // claude conversation id / acp sessionId — persisted for resume
+
+	// ACP harness: daemon is the JSON-RPC *client* of the agent. Outbound
+	// request ids ("omprd-acp-N") map to their purpose so responses can be
+	// correlated; inbound session/request_permission ids map to the
+	// extension_ui_request ids shown to the app.
+	std::mutex acp_mutex;
+	uint64_t acp_next_id = 0;
+	std::unordered_map<std::string, std::string> acp_pending;  // reqId → purpose
+	std::unordered_map<std::string, std::string> acp_perm;     // uiReqId → acp id
+	std::string acp_resume_id;                                 // pending session/load id
 
 	// restart persistence: every emitted frame also appends to
 	// ~/.rig/sessions/<id>.jsonl so a daemon restart restores the inbox and
@@ -3067,8 +3094,10 @@ static void claude_translate(Session* s, const std::string& line) {
 	}
 }
 
+static void acp_translate(Session* s, const std::string& line);
 static void harness_translate(Session* s, const std::string& line) {
 	if (s->harness == "claude") claude_translate(s, line);
+	else if (s->harness == "acp") acp_translate(s, line);
 }
 
 // argv for non-omp harnesses. claude: streaming NDJSON both ways — the
@@ -3089,7 +3118,280 @@ static std::vector<std::string> build_claude_args(const json& opts, const std::s
 	return args;
 }
 
-// omp protocol-v2 chunks any single frame over ~1MB into
+// ---------------------------------------------------------------------------
+// ACP harness — Agent Client Protocol: JSON-RPC 2.0 NDJSON on stdio, with
+// the daemon playing *client* to the agent process. Unlike claude (one-way
+// stream-json), ACP is bidirectional: we must initialize + session/new
+// before session.started, answer agent→client requests, and correlate
+// responses by id.
+// ---------------------------------------------------------------------------
+
+static bool acp_write(Session* s, const json& msg) {
+	std::string line = msg.dump();
+	line.push_back('\n');
+	std::lock_guard<std::mutex> wlock(s->write_mutex);
+	return s->stdin_fd >= 0 && write_all_fd(s->stdin_fd, line.data(), line.size());
+}
+
+// Outbound JSON-RPC request: mints an id, records its purpose for the
+// response correlation in acp_translate, writes to the child's stdin.
+static std::string acp_request(Session* s, const std::string& method, const json& params,
+                               const std::string& purpose) {
+	std::string rid;
+	{
+		std::lock_guard<std::mutex> lock(s->acp_mutex);
+		rid = "omprd-acp-" + std::to_string(++s->acp_next_id);
+		s->acp_pending[rid] = purpose;
+	}
+	json req = {{"jsonrpc", "2.0"}, {"id", rid}, {"method", method}, {"params", params}};
+	if (!acp_write(s, req)) {
+		std::lock_guard<std::mutex> lock(s->acp_mutex);
+		s->acp_pending.erase(rid);
+		return "";
+	}
+	return rid;
+}
+
+// Begin an ACP session once initialize has completed: session/load when a
+// persisted conv_id exists (capability-gated by the agent's init result —
+// callers pass load_ok), else session/new.
+static void acp_begin(Session* s, bool load_ok) {
+	json params = {{"cwd", s->cwd.empty() ? home_dir() : s->cwd}, {"mcpServers", json::array()}};
+	if (load_ok && !s->conv_id.empty()) {
+		params["sessionId"] = s->conv_id;
+		s->acp_resume_id = acp_request(s, "session/load", params, "session/load");
+		if (!s->acp_resume_id.empty()) return;
+	}
+	acp_request(s, "session/new", params, "session/new");
+}
+
+static void acp_kickoff(Session* s) {
+	json caps = {{"fs", {{"readTextFile", false}, {"writeTextFile", false}}},
+	             {"terminal", false}};
+	acp_request(s, "initialize",
+	            {{"protocolVersion", 1},
+	             {"clientCapabilities", caps},
+	             {"clientInfo", {{"name", "omprd"}, {"version", OMPRD_VERSION}}}},
+	            "initialize");
+}
+
+// session/update notifications → omp-shaped frames.
+static void acp_translate_update(Session* s, const json& update) {
+	const std::string u = update.value("sessionUpdate", "");
+	if (u == "agent_message_chunk") {
+		const json c = update.value("content", json::object());
+		if (c.value("type", "") == "text" && c.contains("text")) {
+			json ev = {{"type", "text_delta"}, {"delta", c["text"]}};
+			emit_translated(s, {{"type", "message_update"}, {"assistantMessageEvent", ev}});
+		}
+		return;
+	}
+	if (u == "agent_thought_chunk") {
+		const json c = update.value("content", json::object());
+		if (c.value("type", "") == "text" && c.contains("text")) {
+			json ev = {{"type", "thinking_delta"}, {"delta", c["text"]}};
+			emit_translated(s, {{"type", "message_update"}, {"assistantMessageEvent", ev}});
+		}
+		return;
+	}
+	if (u == "tool_call") {
+		emit_translated(s, {{"type", "tool_execution_start"},
+		                    {"toolCallId", update.value("toolCallId", "")},
+		                    {"toolName", update.value("title", update.value("kind", "tool"))},
+		                    {"args", update.contains("rawInput") ? update["rawInput"] : json::object()}});
+		return;
+	}
+	if (u == "tool_call_update") {
+		const std::string st = update.value("status", "");
+		if (st != "completed" && st != "failed") return;
+		std::string out_txt;
+		for (const json& b : update.value("content", json::array())) {
+			const json c = b.value("content", b);
+			if (c.value("type", "") == "text") out_txt += c.value("text", "");
+		}
+		json out = {{"type", "tool_execution_end"},
+		            {"toolCallId", update.value("toolCallId", "")},
+		            {"ok", st == "completed"}};
+		if (!out_txt.empty()) out["output"] = out_txt.substr(0, 4000);
+		emit_translated(s, out);
+		return;
+	}
+	if (u == "usage_update") {
+		const int64_t used = update.value("used", 0);
+		const int64_t size = update.value("size", 0);
+		if (used > 0) {
+			s->usage_last = used;
+			int64_t prev = s->usage_max.load();
+			while (used > prev && !s->usage_max.compare_exchange_weak(prev, used)) {}
+		}
+		if (size > 0) s->usage_window = size;
+		return;
+	}
+	// plan / available_commands_update / current_mode_update: nothing to
+	// render yet — dropped deliberately rather than leaked into the ring.
+}
+
+// Agent→client requests need replies on the same wire.
+static void acp_translate_request(Session* s, const json& j) {
+	const std::string method = j.value("method", "");
+	const json rid = j["id"];
+	if (method == "session/request_permission") {
+		const json params = j.value("params", json::object());
+		const json tool = params.value("toolCall", json::object());
+		std::string ui_id;
+		{
+			std::lock_guard<std::mutex> lock(s->acp_mutex);
+			ui_id = "acp-perm-" + std::to_string(++s->acp_next_id);
+			s->acp_perm[ui_id] = rid.is_string() ? rid.get<std::string>() : rid.dump();
+		}
+		json opts = json::array();
+		for (const json& o : params.value("options", json::array()))
+			opts.push_back(o.value("name", o.value("optionId", "")));
+		emit_translated(s, {{"type", "extension_ui_request"},
+		                    {"id", ui_id},
+		                    {"method", "confirm"},
+		                    {"title", tool.value("title", "Agent requests permission")},
+		                    {"message", opts.empty() ? json(params.dump()) : json(opts.dump())}});
+		return;
+	}
+	// fs/terminal capabilities were advertised off — answer errors anyway.
+	json err = {{"jsonrpc", "2.0"}, {"id", rid},
+	            {"error", {{"code", -32601}, {"message", "unsupported by omprd"}}}};
+	acp_write(s, err);
+}
+
+// Resolve a permission reply the app sent for a ui id back to the agent.
+static bool acp_resolve_permission(Session* s, const std::string& ui_id, bool confirmed) {
+	std::string acp_id;
+	{
+		std::lock_guard<std::mutex> lock(s->acp_mutex);
+		auto it = s->acp_perm.find(ui_id);
+		if (it == s->acp_perm.end()) return false;
+		acp_id = it->second;
+		s->acp_perm.erase(it);
+	}
+	// Pick an allow/deny option id that exists on most agents.
+	const char* opt = confirmed ? "allow_once" : "reject_once";
+	json resp = {{"jsonrpc", "2.0"},
+	             {"id", json::parse(acp_id)},
+	             {"result", {{"outcome", {{"outcome", "selected"}, {"optionId", opt}}}}}};
+	return acp_write(s, resp);
+}
+
+// Respond to a daemon→agent JSON-RPC response (has id + result/error, no
+// method). Returns true if the line was such a response.
+static bool acp_translate_response(Session* s, const json& j) {
+	if (!j.contains("id") || j.contains("method")) return false;
+	const std::string rid = j["id"].is_string() ? j["id"].get<std::string>() : j["id"].dump();
+	std::string purpose;
+	{
+		std::lock_guard<std::mutex> lock(s->acp_mutex);
+		auto it = s->acp_pending.find(rid);
+		if (it == s->acp_pending.end()) return false;
+		purpose = it->second;
+		s->acp_pending.erase(it);
+	}
+	if (j.contains("error")) {
+		const std::string emsg = j["error"].value("message", j["error"].dump());
+		if (purpose == "session/load") {
+			// resume refused — fall back to a fresh session (ring has history)
+			s->acp_resume_id.clear();
+			json params = {{"cwd", s->cwd.empty() ? home_dir() : s->cwd},
+			               {"mcpServers", json::array()}};
+			acp_request(s, "session/new", params, "session/new");
+			return true;
+		}
+		if (purpose == "initialize" || purpose == "session/new") {
+			if (s->starter && s->starter->alive)
+				send_json(s->starter, {{"type", "error"}, {"error", "acp " + purpose + ": " + emsg},
+				                       {"sessionId", s->id}});
+		} else if (purpose == "session/prompt") {
+			emit_translated(s, {{"type", "prompt_result"}, {"ok", false}, {"error", emsg}});
+			emit_translated(s, {{"type", "session_settled"}});
+		}
+		return true;
+	}
+	const json result = j.value("result", json::object());
+	if (purpose == "initialize") {
+		const json ac = result.value("agentCapabilities", json::object());
+		acp_begin(s, ac.value("loadSession", false));
+		return true;
+	}
+	if (purpose == "session/new" || purpose == "session/load") {
+		if (result.contains("sessionId") && result["sessionId"].is_string())
+			s->conv_id = result["sessionId"].get<std::string>();
+		s->started_acked = true;
+		emit_translated(s, {{"type", "harness_init"}, {"harness", "acp"},
+		                    {"model", result.value("model", "")}});
+		if (s->starter && s->starter->alive)
+			send_json(s->starter, {{"type", "session.started"}, {"sessionId", s->id},
+			                       {"harness", "acp"}});
+		if (purpose == "session/load")
+			broadcast("{\"type\":\"session.started\",\"sessionId\":\"" + s->id + "\",\"resumed\":true}");
+		persist_meta(s);
+		return true;
+	}
+	if (purpose == "session/prompt") {
+		const std::string stop = result.value("stopReason", "end_turn");
+		const bool ok = stop == "end_turn" || stop == "max_tokens" || stop == "max_turn_requests";
+		json pr = {{"type", "prompt_result"}, {"ok", ok}};
+		if (!ok) pr["error"] = stop == "cancelled" ? "Stopped" : ("acp: " + stop);
+		emit_translated(s, pr);
+		emit_translated(s, {{"type", "session_settled"}});
+		return true;
+	}
+	return true;
+}
+
+static void acp_translate(Session* s, const std::string& line) {
+	json j;
+	try { j = json::parse(line); } catch (...) { return; }
+	if (acp_translate_response(s, j)) return;
+	if (j.contains("method")) {
+		if (j.value("method", "") == "session/update") {
+			const json params = j.value("params", json::object());
+			acp_translate_update(s, params.value("update", params));
+		} else {
+			acp_translate_request(s, j);
+		}
+	}
+}
+
+// argv for ACP agents — each vendor exposes ACP differently. opts.harnessBin
+// picks the binary (default claude-code); opts.harnessArgs (string or array)
+// overrides the argv tail entirely.
+static std::vector<std::string> build_acp_args(const json& opts) {
+	std::vector<std::string> args;
+	if (opts.contains("harnessArgs")) {
+		const json& ha = opts["harnessArgs"];
+		if (ha.is_array()) {
+			for (const json& a : ha) if (a.is_string()) args.push_back(a.get<std::string>());
+		} else if (ha.is_string()) {
+			std::istringstream ss(ha.get<std::string>());
+			std::string tok;
+			while (ss >> tok) args.push_back(tok);
+		}
+		if (!args.empty()) return args;
+	}
+	std::string bin = opts.value("harnessBin", "claude-code");
+	std::string base = bin.substr(bin.find_last_of("/\\") + 1);
+	// strip common extensions for the table lookup
+	auto dot = base.find_last_of('.');
+	if (dot != std::string::npos && dot > 0) base = base.substr(0, dot);
+	static const std::map<std::string, std::vector<std::string>> table = {
+		{"claude-code", {"acp"}},
+		{"claude", {"acp"}},
+		{"codex", {"--acp"}},
+		{"gemini", {"--acp"}},
+		{"cursor-agent", {"acp"}},
+		{"copilot", {"--acp", "--stdio"}},
+		{"goose", {"acp"}},
+	};
+	auto it = table.find(base);
+	if (it != table.end()) args = it->second;
+	else args = {"acp"}; // convention for most agent CLIs
+	return args;
+}
 // {"type":"rpc_chunk",chunkId,index,count,byteLength,data(base64)} lines.
 // The correlated omprd- id lives inside the payload, so the marker
 // prefilter cannot see it — unhandled, a chunked response never reaches
@@ -3408,7 +3710,10 @@ static void child_reader(Session* s, bool warm = false) {
 		if (pos) buf.erase(0, pos);
 	}
 	if (!s->started_acked && s->starter && s->starter->alive)
-		send_json(s->starter, {{"type", "error"}, {"error", "omp exited before RPC handshake"}, {"sessionId", s->id}});
+		send_json(s->starter, {{"type", "error"},
+		                       {"error", s->harness == "omp" ? "omp exited before RPC handshake"
+		                                                     : s->harness + " exited before session start"},
+		                       {"sessionId", s->id}});
 	// this thread owns stdout_fd — the reaper never closes it, so close on
 	// the way out (a reap close could race a recycled fd number)
 	if (s->stdout_fd >= 0) { file_close(s->stdout_fd); s->stdout_fd = -1; }
@@ -3525,7 +3830,17 @@ static bool session_request(Session* s, json frame, Client* client, Fanout* fano
 			}
 		};
 		if (ft == "abort" || ft == "interrupt") {
-			if (s->pid > 0) { kill(-s->pid, SIGINT); kill(s->pid, SIGINT); }
+			if (s->harness == "acp") {
+				json cancel = {{"jsonrpc", "2.0"}, {"method", "session/cancel"},
+				               {"params", {{"sessionId", s->conv_id}}}};
+				if (!acp_write(s, cancel) && s->pid > 0) {
+					kill(-s->pid, SIGINT);
+					kill(s->pid, SIGINT);
+				}
+			} else if (s->pid > 0) {
+				kill(-s->pid, SIGINT);
+				kill(s->pid, SIGINT);
+			}
 			respond({{"type", "response"}, {"command", ft}, {"success", true}});
 			return true;
 		}
@@ -3830,13 +4145,13 @@ static bool session_start(const std::string& id, const json& opts, std::string& 
 	std::string dir = cwd.empty() ? home_dir() : cwd;
 	if (!fs::is_directory(dir)) { err = "cwd does not exist: " + dir; return false; }
 
-	const std::string harness = opts.value("harness", "omp");
+	const std::string harness = opts.value("harness", g_harness_default);
 	if (harness != "omp") {
-		if (harness != "claude") { err = "unknown harness: " + harness; return false; }
+		if (harness != "claude" && harness != "acp") { err = "unknown harness: " + harness; return false; }
 		// non-omp runtimes: no rpc handshake, no open_session bind, no warm
 		// pool. Same pipes/pid lifecycle, translated in child_reader.
 		std::string bin = opts.value("harnessBin", "");
-		if (bin.empty()) bin = "claude";
+		if (bin.empty()) bin = harness == "acp" ? "claude-code" : "claude";
 		bool b_has_sep = bin.find_first_of("/\\") != std::string::npos;
 		bool b_is_abs = !bin.empty() && bin[0] == '/';
 #if defined(_WIN32)
@@ -3844,8 +4159,10 @@ static bool session_start(const std::string& id, const json& opts, std::string& 
 #endif
 		if (b_has_sep && !b_is_abs)
 			bin = fs::absolute(bin).lexically_normal().string();
-		std::vector<std::string> args = build_claude_args(opts, "");
-		// pin_cwd=false — claude has no --cwd; the fork chdir()s anyway
+		std::vector<std::string> args =
+			harness == "acp" ? build_acp_args(opts) : build_claude_args(opts, "");
+		// pin_cwd=false — non-omp harnesses have no --cwd; the fork chdir()s
+		// anyway and ACP gets cwd through session/new.
 		OmpChild ch = spawn_omp_child(dir, bin, args, err, false, false);
 		if (ch.pid < 0) { err = "spawn " + harness + " failed: " + err; return false; }
 		auto* s = new Session;
@@ -3853,7 +4170,9 @@ static bool session_start(const std::string& id, const json& opts, std::string& 
 		s->stdin_fd = ch.stdin_fd; s->stdout_fd = ch.stdout_fd;
 		s->running = true;
 		s->starter = starter;
-		s->started_acked = true; // no handshake to wait on
+		// claude has no handshake to wait on; acp's session.started is sent
+		// by acp_translate once initialize→session/new completes.
+		s->started_acked = harness == "claude";
 		s->spawn_opts = opts;
 		s->harness = harness;
 		s->branch = probe_git_branch(dir);
@@ -3874,7 +4193,9 @@ static bool session_start(const std::string& id, const json& opts, std::string& 
 		if (native().init()) native().stay_awake(true);
 #endif
 		std::thread(child_reader, s, false).detach();
-		if (starter && starter->alive)
+		if (harness == "acp") {
+			acp_kickoff(s);
+		} else if (starter && starter->alive)
 			send_json(starter, {{"type", "session.started"}, {"sessionId", s->id},
 			                    {"harness", harness}});
 		log("session " + id + " started on " + harness + " harness (pid " +
@@ -4042,7 +4363,7 @@ static bool session_resume(Session* s, std::string& err) {
 	// conversation — claude's --resume carries it by conv id.
 	if (s->harness != "omp") {
 		std::string bin = s->spawn_opts.value("harnessBin", "");
-		if (bin.empty()) bin = "claude";
+		if (bin.empty()) bin = s->harness == "acp" ? "claude-code" : "claude";
 		bool b_has_sep = bin.find_first_of("/\\") != std::string::npos;
 		bool b_is_abs = !bin.empty() && bin[0] == '/';
 #if defined(_WIN32)
@@ -4050,16 +4371,22 @@ static bool session_resume(Session* s, std::string& err) {
 #endif
 		if (b_has_sep && !b_is_abs)
 			bin = fs::absolute(bin).lexically_normal().string();
-		std::vector<std::string> args = build_claude_args(s->spawn_opts, s->conv_id);
+		std::vector<std::string> args = s->harness == "acp"
+		                                  ? build_acp_args(s->spawn_opts)
+		                                  : build_claude_args(s->spawn_opts, s->conv_id);
 		OmpChild ch = spawn_omp_child(dir, bin, args, err, false, false);
 		if (ch.pid < 0) return false;
 		s->pid = ch.pid;
 		s->stdin_fd = ch.stdin_fd;
 		s->stdout_fd = ch.stdout_fd;
 		s->running = true;
+		s->started_acked = s->harness == "claude"; // acp acks on session/new result
 		s->last_active_ms.store(wall_ms());
 		std::thread(child_reader, s, false).detach();
-		broadcast("{\"type\":\"session.started\",\"sessionId\":\"" + s->id + "\",\"resumed\":true}");
+		if (s->harness == "acp")
+			acp_kickoff(s);
+		else
+			broadcast("{\"type\":\"session.started\",\"sessionId\":\"" + s->id + "\",\"resumed\":true}");
 		log("session " + s->id + " resumed on fresh " + s->harness + " child (pid " +
 		    std::to_string(proc_display_id(ch.pid)) + ")");
 		return true;
@@ -5612,10 +5939,10 @@ static void handle_message(Client* c, const json& m) {
 		// rig default (measured live: children defaulted to a quota-capped
 		// provider and died mid-turn)
 		if (parent)
-			for (const char* k : {"model", "thinking"})
-				if (!opts.contains(k) || !opts[k].is_string() || opts[k].get<std::string>().empty()) {
-					std::string v = parent->spawn_opts.value(k, "");
-					if (!v.empty()) opts[k] = v;
+			for (const char* k : {"model", "thinking", "harness", "harnessBin", "harnessArgs"})
+				if (!opts.contains(k) || (!opts[k].is_string() && !opts[k].is_array()) ||
+				    (opts[k].is_string() && opts[k].get<std::string>().empty())) {
+					if (parent->spawn_opts.contains(k)) opts[k] = parent->spawn_opts[k];
 				}
 		std::string err;
 		if (!session_start(id, opts, err, c)) {
@@ -6012,6 +6339,35 @@ static void handle_message(Client* c, const json& m) {
 			}
 			if (s->harness == "claude" && ft == "interrupt") {
 				if (s->pid > 0) { kill(-s->pid, SIGINT); kill(s->pid, SIGINT); }
+				return;
+			}
+			if (s->harness == "acp" && ft == "prompt") {
+				const std::string text = m["frame"].value("message", "");
+				json content = json::array();
+				content.push_back({{"type", "text"}, {"text", text}});
+				json umsg = {{"role", "user"}, {"content", content}};
+				emit_translated(s, {{"type", "message_end"}, {"message", umsg}});
+				json prompt = {{"sessionId", s->conv_id}, {"prompt", content}};
+				if (s->conv_id.empty() ||
+				    acp_request(s, "session/prompt", prompt, "session/prompt").empty()) {
+					reply({{"type", "error"}, {"error", "acp session not ready"}, {"sessionId", s->id}});
+					return;
+				}
+				emit_translated(s, {{"type", "agent_start"}});
+				return;
+			}
+			if (s->harness == "acp" && (ft == "interrupt" || ft == "abort")) {
+				json cancel = {{"jsonrpc", "2.0"}, {"method", "session/cancel"},
+				               {"params", {{"sessionId", s->conv_id}}}};
+				if (!acp_write(s, cancel) && s->pid > 0) {
+					kill(-s->pid, SIGINT);
+					kill(s->pid, SIGINT);
+				}
+				return;
+			}
+			if (s->harness == "acp" && ft == "extension_ui_response") {
+				acp_resolve_permission(s, m["frame"].value("id", ""),
+				                       m["frame"].value("confirmed", false));
 				return;
 			}
 			reply({{"type", "error"},
@@ -7912,7 +8268,7 @@ static void handle_message(Client* c, const json& m) {
 		}
 
 		if (type == "computer.record.stop") {
-			std::string id = m.value("id", m.value("recordingId", ""));
+			std::string id = rec_id_arg(m);
 			Recorder* r = nullptr;
 			{
 				std::lock_guard<std::mutex> lk(g_rec_mutex);
@@ -7977,7 +8333,7 @@ static void handle_message(Client* c, const json& m) {
 		}
 
 		if (type == "computer.record.get") {
-			std::string id = m.value("id", m.value("recordingId", ""));
+			std::string id = rec_id_arg(m);
 			std::string fmt = m.value("format", "meta");
 			if (!rec_id_ok(id)) { reply({{"type", "error"}, {"error", "valid recording id required"}}); return; }
 			fs::path dir = g_rig.dir / "recordings" / id;
@@ -8049,7 +8405,7 @@ static void handle_message(Client* c, const json& m) {
 		}
 
 		if (type == "computer.record.frames") {
-			std::string id = m.value("id", m.value("recordingId", ""));
+			std::string id = rec_id_arg(m);
 			int from = std::clamp(m.value("from", 1), 1, 1000000);
 			int count = std::clamp(m.value("count", 60), 1, 500);
 			if (!rec_id_ok(id)) { reply({{"type", "error"}, {"error", "valid recording id required"}}); return; }
@@ -8095,7 +8451,7 @@ static void handle_message(Client* c, const json& m) {
 		}
 
 		if (type == "computer.record.delete") {
-			std::string id = m.value("id", m.value("recordingId", ""));
+			std::string id = rec_id_arg(m);
 			if (!rec_id_ok(id)) { reply({{"type", "error"}, {"error", "valid recording id required"}}); return; }
 			{
 				std::lock_guard<std::mutex> lk(g_rec_mutex);
@@ -8165,6 +8521,71 @@ static void handle_message(Client* c, const json& m) {
 // Connection lifecycle
 // ---------------------------------------------------------------------------
 
+// %XX-decoding for request paths.
+static std::string url_decode(const std::string& s) {
+	std::string out;
+	out.reserve(s.size());
+	for (size_t i = 0; i < s.size(); i++) {
+		if (s[i] == '%' && i + 2 < s.size()) {
+			auto hex = [](char c) -> int {
+				if (c >= '0' && c <= '9') return c - '0';
+				if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+				if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+				return -1;
+			};
+			int hi = hex(s[i + 1]), lo = hex(s[i + 2]);
+			if (hi >= 0 && lo >= 0) { out.push_back(char(hi * 16 + lo)); i += 2; }
+			else out.push_back(s[i]);
+		} else if (s[i] == '+') out.push_back(' ');
+		else out.push_back(s[i]);
+	}
+	return out;
+}
+
+static std::string www_mime(const std::string& path) {
+	size_t d = path.find_last_of('.');
+	if (d == std::string::npos) return "application/octet-stream";
+	static const std::map<std::string, std::string> m = {
+		{".html", "text/html; charset=utf-8"}, {".js", "text/javascript; charset=utf-8"},
+		{".mjs", "text/javascript; charset=utf-8"}, {".css", "text/css; charset=utf-8"},
+		{".json", "application/json"}, {".svg", "image/svg+xml"},
+		{".png", "image/png"}, {".jpg", "image/jpeg"}, {".jpeg", "image/jpeg"},
+		{".webp", "image/webp"}, {".gif", "image/gif"}, {".ico", "image/x-icon"},
+		{".wasm", "application/wasm"}, {".woff", "font/woff"}, {".woff2", "font/woff2"},
+		{".ttf", "font/ttf"}, {".txt", "text/plain; charset=utf-8"},
+		{".map", "application/json"}, {".webmanifest", "application/manifest+json"},
+		{".mp4", "video/mp4"}, {".mp3", "audio/mpeg"},
+	};
+	auto it = m.find(path.substr(d));
+	return it != m.end() ? it->second : "application/octet-stream";
+}
+
+// Serve a file under g_www. Canonical-path prefix check + ".." rejection keep
+// the request inside the webroot; dirs resolve to index.html.
+static std::string www_read(const std::string& path, std::string& mime) {
+	if (g_www.empty()) return "";
+	if (path.find("..") != std::string::npos || path.find('\0') != std::string::npos) return "";
+	std::error_code ec;
+	fs::path root = fs::weakly_canonical(g_www, ec);
+	if (ec) return "";
+	std::string rel = path;
+	while (!rel.empty() && rel[0] == '/') rel.erase(rel.begin());
+	fs::path full = fs::weakly_canonical(root / rel, ec);
+	if (ec) return "";
+	if (fs::is_directory(full, ec)) { full = fs::weakly_canonical(full / "index.html", ec); if (ec) return ""; }
+	std::string fs_str = full.string();
+	std::string root_str = root.string();
+	if (fs_str.compare(0, root_str.size(), root_str) != 0) return "";
+	if (!fs::is_regular_file(full, ec) || ec) return "";
+	std::ifstream f(full, std::ios::binary);
+	if (!f) return "";
+	std::ostringstream ss;
+	ss << f.rdbuf();
+	if (ss.str().size() > 64 * 1024 * 1024) return "";
+	mime = www_mime(fs_str);
+	return ss.str();
+}
+
 static void serve_client_inner(Client* c) {
 	std::string req;
 	char buf[4096];
@@ -8176,6 +8597,47 @@ static void serve_client_inner(Client* c) {
 	}
 
 	if (req.rfind("GET /ws", 0) != 0) {
+		// GET / stays JSON diagnostics for API/mobile clients; browsers
+		// (Accept: text/html) and asset paths get the webapp when --www set.
+		std::string path = "/";
+		{
+			size_t sp = req.find(' ');
+			if (sp != std::string::npos) {
+				size_t sp2 = req.find(' ', sp + 1);
+				if (sp2 != std::string::npos) path = req.substr(sp + 1, sp2 - sp - 1);
+			}
+			size_t q = path.find('?');
+			if (q != std::string::npos) path.resize(q);
+			path = url_decode(path);
+		}
+		const bool wants_html = header_value(req, "Accept").find("text/html") != std::string::npos;
+		const bool is_root = path == "/" || path.empty();
+		if (!g_www.empty() && (is_root ? wants_html : true)) {
+			std::string mime;
+			std::string body = www_read(path, mime);
+			if (body.empty() && !is_root && wants_html) {
+				body = www_read("/index.html", mime); // SPA fallback
+				if (!body.empty()) mime = "text/html";
+			}
+			if (body.empty() && !is_root) {
+				static const char* nf = "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+				net_send(c->fd, nf, strlen(nf), MSG_NOSIGNAL);
+				return;
+			}
+			if (!body.empty()) {
+				std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: " + mime +
+				                  "\r\nContent-Length: " + std::to_string(body.size()) +
+				                  "\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n";
+				net_send(c->fd, hdr.data(), hdr.size(), MSG_NOSIGNAL);
+				size_t sent = 0;
+				while (sent < body.size()) {
+					ssize_t n = net_send(c->fd, body.data() + sent, body.size() - sent, MSG_NOSIGNAL);
+					if (n <= 0) break;
+					sent += size_t(n);
+				}
+				return;
+			}
+		}
 		// unauthenticated diagnostics page — lets any tailnet browser check the rig
 		std::lock_guard<std::mutex> lock(g_sessions_mutex);
 		json body = {{"name", "omprd"}, {"version", OMPRD_VERSION}, {"uptimeMs", now_ms() - g_boot_ms},
@@ -8442,6 +8904,8 @@ int main(int argc, char** argv) {
 	std::string bind_ip;
 	int port = g_port;
 	std::string omp_bin;
+	std::string www;
+	std::string harness_default;
 	bool qr_flag = false;
 	bool keep_awake = true; // default on — a rig that sleeps isn't reachable
 	for (int i = 1; i < argc; i++) {
@@ -8449,6 +8913,8 @@ int main(int argc, char** argv) {
 		if (a == "--bind" && i + 1 < argc) bind_ip = argv[++i];
 		else if (a == "--port" && i + 1 < argc) port = std::atoi(argv[++i]);
 		else if (a == "--omp-bin" && i + 1 < argc) omp_bin = argv[++i];
+		else if (a == "--www" && i + 1 < argc) www = argv[++i];
+		else if (a == "--harness-default" && i + 1 < argc) harness_default = argv[++i];
 		else if (a == "--qr") qr_flag = true;
 		else if (a == "--keep-awake") keep_awake = true;
 		else if (a == "--no-keep-awake") keep_awake = false;
@@ -8480,8 +8946,9 @@ int main(int argc, char** argv) {
 			return 0;
 		}
 		else {
-			std::cerr << "usage: omprd [--bind ip] [--port n] [--omp-bin path] [--qr]\n"
-			          << "             [--keep-awake | --no-keep-awake] | omprd pair [--scopes a,b]\n";
+			std::cerr << "usage: omprd [--bind ip] [--port n] [--omp-bin path] [--www dir]\n"
+			          << "             [--harness-default name] [--qr] [--keep-awake | --no-keep-awake]\n"
+			          << "         omprd pair [--scopes a,b] [--png path]\n";
 			return 2;
 		}
 	}
@@ -8498,6 +8965,15 @@ int main(int argc, char** argv) {
 	if (bind_ip.empty()) bind_ip = detect_best_ip();
 	g_bind_ip = bind_ip;
 	g_port = port;
+	if (!harness_default.empty()) g_harness_default = harness_default;
+	if (!www.empty()) {
+		if (!fs::is_directory(www)) {
+			std::cerr << "--www is not a directory: " << www << "\n";
+			return 1;
+		}
+		g_www = fs::absolute(www).lexically_normal().string();
+		log("serving webapp from " + g_www);
+	}
 	g_omp_bin = [&] {
 		if (!omp_bin.empty()) return omp_bin;
 		if (const char* env = getenv("OMP_BIN")) return std::string(env);

@@ -1,0 +1,176 @@
+/* Terminal view — dark chrome around xterm, scoped under .termview */
+.termview {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: #101014;
+  color: #e8e6e3;
+}
+.termview__bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex: none;
+  flex-wrap: wrap;
+}
+.termview__tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.termview__tabs::-webkit-scrollbar {
+  display: none;
+}
+.termview__tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px 5px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
+  color: rgba(232, 230, 227, 0.6);
+  font: 500 12px/1 var(--font-ui);
+  white-space: nowrap;
+  flex: none;
+}
+.termview__tab:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: #e8e6e3;
+}
+.termview__tab--on {
+  background: rgba(255, 255, 255, 0.13);
+  color: #e8e6e3;
+}
+.termview__tabname {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.termview__tabx {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  color: rgba(232, 230, 227, 0.45);
+}
+.termview__tabx:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.termview__iconbtn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e8e6e3;
+  flex: none;
+}
+.termview__iconbtn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+.termview__cwd {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: rgba(232, 230, 227, 0.55);
+}
+.termview__cwd select,
+.termview__cwd input {
+  background: rgba(255, 255, 255, 0.07);
+  color: #e8e6e3;
+  border: 0;
+  border-radius: 8px;
+  padding: 5px 8px;
+  font: 500 12px var(--font-mono);
+  outline: none;
+  max-width: 260px;
+}
+.termview__cwd select {
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.termview__cwd select option {
+  background: #1c1c22;
+  color: #e8e6e3;
+}
+.termview__cwd input {
+  width: 180px;
+}
+.termview__conn {
+  font: 600 10.5px var(--font-ui);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(232, 230, 227, 0.5);
+  flex: none;
+}
+.termview__conn--on {
+  background: rgba(27, 166, 114, 0.16);
+  color: #34c98e;
+}
+.termview__body {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: #16161a;
+}
+.termview__term {
+  height: 100%;
+  padding: 8px 4px 4px 10px;
+}
+.termview__term .xterm {
+  height: 100%;
+}
+.termview__term .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+.termview__term .xterm-viewport::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 4px;
+}
+.termview__empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: rgba(232, 230, 227, 0.5);
+  font-size: 13px;
+}
+.termview__empty p {
+  margin: 0;
+}
+.termview__empty .pill--ink {
+  background: #e8e6e3;
+  color: #16161a;
+  padding: 9px 16px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+@media (max-width: 720px) {
+  .termview__cwd {
+    order: 3;
+    flex-basis: 100%;
+  }
+  .termview__cwd select,
+  .termview__cwd input {
+    flex: 1;
+    max-width: none;
+    width: 0;
+  }
+}

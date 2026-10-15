@@ -1,0 +1,160 @@
+/* ---------- Screen view (live rig display) + Recordings (playback) ----------
+   Scoped under .screenview / .recordings — shared chrome for the computer.* views. */
+
+.screenview { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px 14px 14px; gap: 10px; }
+.screenview__head { display: flex; align-items: center; gap: 10px; }
+.screenview__titles { flex: 1; min-width: 0; }
+.screenview__title { font: 600 16px var(--font-ui); color: var(--ink); }
+.screenview__sub { font-size: 12px; color: var(--sub); margin-top: 1px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.screenview__live {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: var(--r-pill);
+  background: var(--ok-bg); color: var(--ok); font: 500 11px var(--font-ui);
+}
+.screenview__live--off { background: var(--control-bg); color: var(--sub); }
+.screenview__livedot { width: 7px; height: 7px; border-radius: 4px; background: currentColor; }
+.screenview__live:not(.screenview__live--off) .screenview__livedot { animation: sv-blink 1.6s infinite; }
+
+.screenview__stage {
+  position: relative; flex: 1; min-height: 240px;
+  border-radius: 18px; overflow: hidden;
+  background: #141417; border: 1px solid var(--hairline);
+  box-shadow: var(--sh-card);
+}
+.screenview__stage--ctrl { cursor: crosshair; }
+.screenview__stage img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.screenview__wait {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px;
+  color: rgba(255, 255, 255, 0.55); font-size: 13px;
+}
+.screenview__waitwarn { font-size: 11px; color: var(--warn); text-align: center; padding: 0 20px; }
+.screenview__cursor {
+  position: absolute; width: 10px; height: 10px; border-radius: 50%;
+  background: #0b0b0e; border: 1.5px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4); pointer-events: none;
+}
+.screenview__status {
+  position: absolute; top: 10px; left: 10px; pointer-events: none;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: var(--r-pill);
+  background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(8px);
+  color: #161513; font: 500 11px var(--font-ui);
+}
+.screenview__statusdot { width: 7px; height: 7px; border-radius: 4px; background: var(--ok); }
+.screenview__status--ctrl .screenview__statusdot { background: var(--warn); }
+.screenview__recchip {
+  position: absolute; top: 10px; right: 10px;
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 10px; border-radius: var(--r-pill);
+  background: rgba(224, 62, 62, 0.9); color: #fff; font: 600 11px var(--font-ui);
+}
+.screenview__recchip .dot { width: 7px; height: 7px; border-radius: 4px; background: #fff; animation: sv-blink 1s infinite; }
+.screenview__stopsq { width: 8px; height: 8px; border-radius: 2px; background: #fff; }
+
+.screenview__controls { display: flex; align-items: center; gap: 10px; flex: none; }
+.screenview__meta {
+  flex: 1; min-width: 0; font: 500 12.5px var(--font-ui); color: var(--sub);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.screenview__iconbtn {
+  width: 36px; height: 36px; border-radius: 18px; flex: none;
+  display: grid; place-items: center;
+  background: var(--surface); border: 1px solid var(--hairline-strong); color: var(--sub);
+}
+.screenview__recpill {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-width: 36px; height: 36px; padding: 0 10px; border-radius: var(--r-pill);
+  background: var(--surface); border: 1px solid var(--hairline-strong);
+  color: var(--bad); font: 700 12px var(--font-ui); flex: none;
+}
+.screenview__recpill--on { background: rgba(224, 62, 62, 0.09); border-color: rgba(224, 62, 62, 0.3); }
+.screenview__recpill .dot { width: 8px; height: 8px; border-radius: 4px; background: var(--bad); animation: sv-blink 1s infinite; }
+.screenview__takeover {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  padding: 9px 14px; border-radius: var(--r-pill);
+  background: var(--ink); color: var(--surface); font: 600 12.5px var(--font-ui);
+}
+.screenview__typerow {
+  flex: 1; display: flex; align-items: center; gap: 8px; min-width: 0;
+  background: var(--surface); border: 1px solid var(--hairline-strong);
+  border-radius: var(--r-pill); padding: 8px 12px;
+}
+.screenview__typerow input { flex: 1; min-width: 0; border: 0; background: none; outline: none; font-size: 13.5px; color: var(--ink); }
+.screenview__typerow input::placeholder { color: var(--placeholder); }
+.screenview__send { color: var(--sub); display: grid; place-items: center; }
+.screenview__keybtn {
+  padding: 8px 12px; border-radius: var(--r-pill); flex: none;
+  background: var(--surface); border: 1px solid var(--hairline-strong);
+  font: 600 11.5px var(--font-ui); color: var(--sub);
+}
+.screenview__err { margin: 0; font-size: 11.5px; color: var(--bad-fg); }
+
+.screenview__wins { background: var(--surface); border: 1px solid var(--hairline); border-radius: 16px; padding: 10px 12px 12px; flex: none; }
+.screenview__winslabel { font: 600 10px var(--font-ui); letter-spacing: 1px; color: var(--faint); margin-bottom: 8px; }
+.screenview__winlist { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.screenview__win {
+  display: flex; align-items: center; gap: 7px; flex: none; max-width: 260px;
+  padding: 7px 11px; border-radius: var(--r-pill);
+  background: var(--control-bg); font: 500 12px var(--font-ui); color: var(--sub); white-space: nowrap;
+}
+.screenview__wintitle { overflow: hidden; text-overflow: ellipsis; }
+.screenview__windot { width: 6px; height: 6px; border-radius: 3px; background: var(--faint); flex: none; }
+.screenview__win--active { color: var(--ink); }
+.screenview__win--active .screenview__windot { background: var(--ok); }
+.screenview__windims { font-size: 10.5px; color: var(--faint); }
+
+@keyframes sv-blink { 50% { opacity: 0.35; } }
+
+/* ------------------------------ recordings ------------------------------- */
+.recordings { display: flex; flex-direction: column; flex: 1; min-height: 0; padding: 12px 14px 14px; gap: 10px; }
+.recordings__head { display: flex; align-items: center; gap: 10px; }
+.recordings__title { font: 600 16px var(--font-ui); color: var(--ink); }
+.recordings__sub { font-size: 12px; color: var(--sub); margin-top: 1px; }
+.recordings__refresh { display: flex; align-items: center; gap: 6px; padding: 8px 13px; border-radius: var(--r-pill); background: var(--surface); border: 1px solid var(--hairline-strong); font: 600 12px var(--font-ui); color: var(--ink); flex: none; }
+.recordings__err { background: rgba(224, 62, 62, 0.08); border-radius: 12px; padding: 8px 12px; font-size: 13px; color: var(--bad-fg); }
+
+.recordings__player { border-radius: 18px; overflow: hidden; background: #141417; border: 1px solid var(--hairline); box-shadow: var(--sh-card); flex: none; }
+.recordings__frame { position: relative; aspect-ratio: 16 / 10; background: #0b0b0e; max-height: 55vh; }
+.recordings__frame img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+.recordings__framewait { position: absolute; inset: 0; display: grid; place-items: center; color: rgba(255, 255, 255, 0.6); font-size: 13px; }
+.recordings__livetag {
+  position: absolute; top: 10px; left: 10px;
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 9px; border-radius: var(--r-pill);
+  background: rgba(224, 62, 62, 0.85); color: #fff; font: 500 11px var(--font-ui);
+}
+.recordings__livetag .dot { width: 7px; height: 7px; border-radius: 4px; background: #fff; animation: sv-blink 1s infinite; }
+.recordings__close { position: absolute; top: 10px; right: 10px; width: 30px; height: 30px; border-radius: 15px; display: grid; place-items: center; background: rgba(0, 0, 0, 0.45); color: #fff; }
+.recordings__transport { display: flex; align-items: center; gap: 10px; padding: 12px 12px 6px; }
+.recordings__play { width: 32px; height: 32px; border-radius: 16px; display: grid; place-items: center; background: var(--accent); color: #fff; flex: none; }
+.recordings__track { flex: 1; accent-color: #fff; min-width: 0; }
+.recordings__time { font: 500 11px var(--font-mono); color: rgba(255, 255, 255, 0.7); min-width: 74px; text-align: right; flex: none; }
+.recordings__metarow { display: flex; align-items: center; gap: 12px; padding: 6px 14px 12px; font-size: 11px; color: rgba(255, 255, 255, 0.55); }
+.recordings__metatext { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recordings__pbtn { color: rgba(255, 255, 255, 0.65); display: grid; place-items: center; flex: none; }
+.recordings__pbtn--bad { color: var(--bad); }
+
+.recordings__list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding-bottom: 20px; }
+.recordings__row {
+  display: flex; align-items: center; gap: 12px; flex: none;
+  padding: 10px 12px; border-radius: 14px; text-align: left;
+  background: var(--surface); border: 1px solid var(--hairline);
+}
+.recordings__row--open { border-color: var(--hairline-strong); }
+.recordings__thumb {
+  width: 76px; height: 48px; border-radius: 9px; flex: none; overflow: hidden;
+  background: #141417; display: grid; place-items: center; color: rgba(255, 255, 255, 0.35);
+}
+.recordings__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.recordings__name { display: block; font: 600 13px var(--font-ui); color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recordings__rowsub { display: block; font-size: 11.5px; color: var(--sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.recordings__reclive {
+  display: flex; align-items: center; gap: 5px; flex: none;
+  padding: 4px 9px; border-radius: var(--r-pill);
+  background: rgba(224, 62, 62, 0.1); color: var(--bad); font: 500 11px var(--font-ui);
+}
+.recordings__reclive .dot { width: 7px; height: 7px; border-radius: 4px; background: var(--bad); animation: sv-blink 1s infinite; }
+.recordings__del { color: var(--faint); display: grid; place-items: center; flex: none; padding: 6px; }
+.recordings__del:hover { color: var(--bad); }
+.recordings__empty { display: flex; flex-direction: column; align-items: center; gap: 10px; padding-top: 60px; color: var(--sub); font-size: 13px; text-align: center; }
